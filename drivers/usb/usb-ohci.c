@@ -828,11 +828,40 @@ static int sohci_free_dev (struct usb_device * usb_dev)
 	
 	if (usb_dev->devnum >= 0) {
 	
+		spin_lock_irqsave (&usb_ed_lock, flags);	
+
+		/* Wait for EDs which ed->state & ED_URB_DEL */
+		for(i = 0; i < NUM_EDS; i++) {
+  			ed = &(dev->ed[i]);
+  			if (ed->state != ED_NEW && (ed->state & ED_URB_DEL)) {
+				DECLARE_WAIT_QUEUE_HEAD (freedev_wakeup); 
+				DECLARE_WAITQUEUE (wait, current);
+				int timeout = OHCI_UNLINK_TIMEOUT;
+
+				if (ohci->disabled || in_interrupt()) {
+					err("sohci_free_dev devnum %d deletion in interrupt", usb_dev->devnum);
+					BUG ();
+				}
+
+				add_wait_queue (&freedev_wakeup, &wait);
+				dev->wait = &freedev_wakeup;
+
+				spin_unlock_irqrestore (&usb_ed_lock, flags);
+
+				set_current_state(TASK_UNINTERRUPTIBLE);
+				while (timeout && (ed->state & ED_URB_DEL))
+					timeout = schedule_timeout (timeout);
+				set_current_state(TASK_RUNNING);
+				remove_wait_queue (&freedev_wakeup, &wait);
+
+				spin_lock_irqsave (&usb_ed_lock, flags);
+			}
+		}
+
 		/* driver disconnects should have unlinked all urbs
 		 * (freeing all the TDs, unlinking EDs) but we need
 		 * to defend against bugs that prevent that.
 		 */
-		spin_lock_irqsave (&usb_ed_lock, flags);	
 		for(i = 0; i < NUM_EDS; i++) {
   			ed = &(dev->ed[i]);
   			if (ed->state != ED_NEW) {
@@ -1120,8 +1149,8 @@ static int ep_unlink (ohci_t * ohci, ed_t * ed)
 		for (i = 0; i < ep_rev (6, interval); i += inter) {
 			for (ed_p = &(ohci->hcca->int_table[ep_rev (5, i) + int_branch]), inter = 1; 
 				(*ed_p != 0) && (*ed_p != ed->hwNextED); 
-				ed_p = &((dma_to_ed (ohci, le32_to_cpup (ed_p)))->hwNextED), 
-				inter = ep_rev (6, (dma_to_ed (ohci, le32_to_cpup (ed_p)))->int_interval)) {				
+				inter = ep_rev (6, (dma_to_ed (ohci, le32_to_cpup (ed_p)))->int_interval),
+				ed_p = &((dma_to_ed (ohci, le32_to_cpup (ed_p)))->hwNextED)) {
 					if((dma_to_ed (ohci, le32_to_cpup (ed_p))) == ed) {
 			  			*ed_p = ed->hwNextED;		
 			  			break;
@@ -1606,8 +1635,16 @@ static void dl_del_list (ohci_t  * ohci, unsigned int frame)
 					wake_up (wait_head);
 			}
    	 	} else {
+			struct ohci_device * dev = usb_to_ohci (ohci->dev[edINFO & 0x7F]);
+			wait_queue_head_t *wait_head = dev->wait;
+
    	 		ed->state &= ~ED_URB_DEL;
 			tdHeadP = dma_to_td (ohci, le32_to_cpup (&ed->hwHeadP) & 0xfffffff0);
+
+			/* wake up sohci_free_dev waiting for ~ED_URB_DEL */
+			dev->wait = 0;
+			if (wait_head)
+				wake_up (wait_head);
 
 			if (tdHeadP == tdTailP) {
 				if (ed->state == ED_OPER)
@@ -2280,6 +2317,10 @@ static void hc_interrupt (int irq, void * __ohci, struct pt_regs * r)
 		return;
 	}
 
+#ifdef CONFIG_USB_OHCI_PS2
+	writel (OHCI_INTR_MIE, &regs->intrdisable);
+#endif
+
 	// dbg("Interrupt: %x frame: %x", ints, le16_to_cpu (ohci->hcca->frame_no));
 
 	if (ints & OHCI_INTR_UE) {
@@ -2431,7 +2472,7 @@ static void hc_release_ohci (ohci_t * ohci)
  */
 int __devinit
 hc_add_ohci(struct pci_dev *dev, int irq, void *mem_base, unsigned long flags,
-	    ohci_t **ohci, const char *name, const char *slot_name)
+	    ohci_t **ohcip, const char *name, const char *slot_name)
 {
 	char buf[8], *bufp = buf;
 	ohci_t * ohci;
@@ -2485,6 +2526,8 @@ hc_add_ohci(struct pci_dev *dev, int irq, void *mem_base, unsigned long flags,
 #ifdef	DEBUG
 	ohci_dump (ohci, 1);
 #endif
+	*ohcip = ohci;
+
 	return 0;
 }
 
@@ -2516,6 +2559,6 @@ MODULE_DESCRIPTION( DRIVER_DESC );
 MODULE_LICENSE("GPL");
 
 /* Hack until usb-ohci-pci is made completely independent */
-#if !defined(CONFIG_USB_OHCI_SA1111) && !defined(CONFIG_USB_NON_PCI_OHCI)
+#if !defined(CONFIG_USB_OHCI_SA1111) && !defined(CONFIG_USB_NON_PCI_OHCI) && !defined(CONFIG_USB_OHCI_PS2)
 #include "usb-ohci-pci.c"
 #endif
