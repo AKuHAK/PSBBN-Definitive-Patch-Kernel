@@ -15,6 +15,7 @@ if [ "$CONFIG_PARTITION_ADVANCED" = "y" ]; then
    bool '  Alpha OSF partition support' CONFIG_OSF_PARTITION
    bool '  Amiga partition table support' CONFIG_AMIGA_PARTITION
    bool '  Atari partition table support' CONFIG_ATARI_PARTITION
+   bool '  PS2 APA Partition support' CONFIG_PS2_PARTITION
    if [ "$CONFIG_ARCH_S390" = "y" ]; then
       bool '  IBM disk label and partition support' CONFIG_IBM_PARTITION
    fi
@@ -68,5 +69,8 @@ else
    fi
    if [ "$ARCH" = "sparc" -o "$ARCH" = "sparc64" ]; then
       define_bool CONFIG_SUN_PARTITION y
+   fi
+   if [ "$CONFIG_PS2" = "y" ]; then
+      define_bool CONFIG_PS2_PARTITION y
    fi
 fi

@@ -161,6 +161,9 @@ out:
 
 
 extern int blk_dev_init(void);
+#ifdef CONFIG_FUSION_BOOT
+extern int fusion_init(void);
+#endif
 extern int net_dev_init(void);
 extern void console_map_init(void);
 extern int soc_probe(void);
@@ -170,11 +173,16 @@ extern int cpqarray_init(void);
 
 int __init device_init(void)
 {
+	struct gendisk *gp;
+
 	rwlock_init(&gendisk_lock);
 	blk_dev_init();
 	sti();
 #ifdef CONFIG_I2O
 	i2o_init();
+#endif
+#ifdef CONFIG_FUSION_BOOT
+	fusion_init();
 #endif
 #ifdef CONFIG_FC4_SOC
 	/* This has to be done before scsi_dev_init */
@@ -192,6 +200,11 @@ int __init device_init(void)
 #ifdef CONFIG_VT
 	console_map_init();
 #endif
+	
+	for (gp = gendisk_head ; gp ; gp=gp->next){
+	  blk_dev[gp->major].gd = gp;
+	}
+
 	return 0;
 }
 

@@ -9,7 +9,7 @@
 mod-subdirs :=	dio mtd sbus video macintosh usb input telephony sgi ide \
 		message/i2o message/fusion scsi md ieee1394 pnp isdn atm \
 		fc4 net/hamradio i2c l3 acpi bluetooth serial maple vme \
-		sensors
+		sensors ps2
 
 subdir-y :=	parport char block net sound misc media cdrom hotplug
 subdir-m :=	$(subdir-y)
@@ -54,7 +54,6 @@ subdir-$(CONFIG_BLUEZ)		+= bluetooth
 subdir-$(CONFIG_SSI)		+= ssi
 subdir-$(CONFIG_MAPLE)		+= maple
 subdir-$(CONFIG_VMEBUS)		+= vme
-
-subdir-$(CONFIG_ARCH_CAMELOT)   += pld
+subdir-$(CONFIG_PS2)		+= ps2
 
 include $(TOPDIR)/Rules.make

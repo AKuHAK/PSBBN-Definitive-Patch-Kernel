@@ -33,6 +33,7 @@
 #include "sun.h"
 #include "ibm.h"
 #include "ultrix.h"
+#include "ps2.h"
 
 extern int *blk_size[];
 
@@ -43,6 +44,10 @@ static int (*check_part[])(struct gendisk *hd, struct block_device *bdev, unsign
 	 * Probe partition formats with tables at disk address 0
 	 * that also have an ADFS boot block at 0xdc0.
 	 */
+#ifdef CONFIG_PS2_PARTITION
+	ps2_partition,
+#endif
+
 #ifdef CONFIG_ACORN_PARTITION_ICS
 	adfspart_check_ICS,
 #endif
