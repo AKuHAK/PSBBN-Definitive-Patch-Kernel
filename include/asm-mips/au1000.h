@@ -56,34 +56,22 @@ void static inline au_sync_delay(int ms)
 	mdelay(ms);
 }
 
-void static inline au_writeb(u8 val, int reg)
+void static inline outb_sync(u8 val, int reg)
 {
-	*(volatile u8 *)(reg) = val;
+	outb(val, reg);
+	au_sync();
 }
 
-void static inline au_writew(u16 val, int reg)
+void static inline outw_sync(u16 val, int reg)
 {
-	*(volatile u16 *)(reg) = val;
+	outw(val, reg);
+	au_sync();
 }
 
-void static inline au_writel(u32 val, int reg)
+void static inline outl_sync(u32 val, int reg)
 {
-	*(volatile u32 *)(reg) = val;
-}
-
-static inline u8 au_readb(unsigned long port)
-{
-	return (*(volatile u8 *)port);
-}
-
-static inline u16 au_readw(unsigned long port)
-{
-	return (*(volatile u16 *)port);
-}
-
-static inline u32 au_readl(unsigned long port)
-{
-	return (*(volatile u32 *)port);
+	outl(val, reg);
+	au_sync();
 }
 
 /* arch/mips/au1000/common/clocks.c */
@@ -316,12 +304,6 @@ extern unsigned int get_au1000_lcd_clock(void);
 
 #define AU1000_MAX_INTR           63
 
-#define AU1100_SD		2
-#define	AU1100_GPIO_208_215	29
-// REDEFINE SECONDARY GPIO BLOCK INTO IC1 CONTROLLER HERE
-
-
-
 /* Programmable Counters 0 and 1 */
 #define SYS_BASE                   0xB1900000
 #define SYS_COUNTER_CNTRL          (SYS_BASE + 0x14)
@@ -445,7 +427,6 @@ extern unsigned int get_au1000_lcd_clock(void);
 #define AU1000_ETH1_BASE          0xB0510000
 #define AU1500_ETH0_BASE	  0xB1500000
 #define AU1500_ETH1_BASE	  0xB1510000
-#define AU1100_ETH0_BASE	  0xB0500000
 
 /* 4 byte offsets from AU1000_ETH_BASE */
 #define MAC_CONTROL                     0x0
@@ -494,8 +475,6 @@ extern unsigned int get_au1000_lcd_clock(void);
 #define AU1000_MAC1_ENABLE       0xB0520004
 #define AU1500_MAC0_ENABLE       0xB1520000
 #define AU1500_MAC1_ENABLE       0xB1520004
-#define AU1100_MAC0_ENABLE       0xB0520000
-
   #define MAC_EN_CLOCK_ENABLE         (1<<0)
   #define MAC_EN_RESET0               (1<<1)
   #define MAC_EN_TOSS                 (0<<2)
@@ -789,7 +768,6 @@ extern unsigned int get_au1000_lcd_clock(void);
 #define SYS_OUTPUTSET             0xB1900108
 #define SYS_OUTPUTCLR             0xB190010C
 #define SYS_PINSTATERD            0xB1900110
-#define SYS_PININPUTEN            0xB1900110
 
 /* GPIO2, Au1500 only */
 #define GPIO2_BASE                0xB1700000
@@ -812,53 +790,53 @@ extern unsigned int get_au1000_lcd_clock(void);
 /* Clock Controller */
 #define SYS_FREQCTRL0             0xB1900020
   #define SYS_FC_FRDIV2_BIT         22
-  #define SYS_FC_FRDIV2_MASK        (0xff << FQC2_FRDIV2_BIT)
+  #define SYS_FC_FRDIV2_MASK        (0xff << SYS_FC_FRDIV2_BIT)
   #define SYS_FC_FE2                (1<<21)
   #define SYS_FC_FS2                (1<<20)
   #define SYS_FC_FRDIV1_BIT         12
-  #define SYS_FC_FRDIV1_MASK        (0xff << FQC2_FRDIV1_BIT)
+  #define SYS_FC_FRDIV1_MASK        (0xff << SYS_FC_FRDIV1_BIT)
   #define SYS_FC_FE1                (1<<11)
   #define SYS_FC_FS1                (1<<10)
   #define SYS_FC_FRDIV0_BIT         2
-  #define SYS_FC_FRDIV0_MASK        (0xff << FQC2_FRDIV0_BIT)
+  #define SYS_FC_FRDIV0_MASK        (0xff << SYS_FC_FRDIV0_BIT)
   #define SYS_FC_FE0                (1<<1)
   #define SYS_FC_FS0                (1<<0)
 #define SYS_FREQCTRL1             0xB1900024
   #define SYS_FC_FRDIV5_BIT         22
-  #define SYS_FC_FRDIV5_MASK        (0xff << FQC2_FRDIV5_BIT)
+  #define SYS_FC_FRDIV5_MASK        (0xff << SYS_FC_FRDIV5_BIT)
   #define SYS_FC_FE5                (1<<21)
   #define SYS_FC_FS5                (1<<20)
   #define SYS_FC_FRDIV4_BIT         12
-  #define SYS_FC_FRDIV4_MASK        (0xff << FQC2_FRDIV4_BIT)
+  #define SYS_FC_FRDIV4_MASK        (0xff << SYS_FC_FRDIV4_BIT)
   #define SYS_FC_FE4                (1<<11)
   #define SYS_FC_FS4                (1<<10)
   #define SYS_FC_FRDIV3_BIT         2
-  #define SYS_FC_FRDIV3_MASK        (0xff << FQC2_FRDIV3_BIT)
+  #define SYS_FC_FRDIV3_MASK        (0xff << SYS_FC_FRDIV3_BIT)
   #define SYS_FC_FE3                (1<<1)
   #define SYS_FC_FS3                (1<<0)
 #define SYS_CLKSRC                0xB1900028
   #define SYS_CS_ME1_BIT            27
-  #define SYS_CS_ME1_MASK           (0x7<<CSC_ME1_BIT)
+  #define SYS_CS_ME1_MASK           (0x7<<SYS_CS_ME1_BIT)
   #define SYS_CS_DE1                (1<<26)
   #define SYS_CS_CE1                (1<<25)
   #define SYS_CS_ME0_BIT            22
-  #define SYS_CS_ME0_MASK           (0x7<<CSC_ME0_BIT)
+  #define SYS_CS_ME0_MASK           (0x7<<SYS_CS_ME0_BIT)
   #define SYS_CS_DE0                (1<<21)
   #define SYS_CS_CE0                (1<<20)
   #define SYS_CS_MI2_BIT            17
-  #define SYS_CS_MI2_MASK           (0x7<<CSC_MI2_BIT)
+  #define SYS_CS_MI2_MASK           (0x7<<SYS_CS_MI2_BIT)
   #define SYS_CS_DI2                (1<<16)
   #define SYS_CS_CI2                (1<<15)
   #define SYS_CS_MUH_BIT            12
-  #define SYS_CS_MUH_MASK           (0x7<<CSC_MUH_BIT)
+  #define SYS_CS_MUH_MASK           (0x7<<SYS_CS_MUH_BIT)
   #define SYS_CS_DUH                (1<<11)
   #define SYS_CS_CUH                (1<<10)
   #define SYS_CS_MUD_BIT            7
-  #define SYS_CS_MUD_MASK           (0x7<<CSC_MUD_BIT)
+  #define SYS_CS_MUD_MASK           (0x7<<SYS_CS_MUD_BIT)
   #define SYS_CS_DUD                (1<<6)
   #define SYS_CS_CUD                (1<<5)
   #define SYS_CS_MIR_BIT            2
-  #define SYS_CS_MIR_MASK           (0x7<<CSC_MIR_BIT)
+  #define SYS_CS_MIR_MASK           (0x7<<SYS_CS_MIR_BIT)
   #define SYS_CS_DIR                (1<<1)
   #define SYS_CS_CIR                (1<<0)
 
@@ -923,19 +901,11 @@ extern unsigned int get_au1000_lcd_clock(void);
 
 #define Au1500_PCI_HDR            0xB4005100 // virtual, kseg0 addr
 
-/* All of our structures, like pci resource, have 32 bit members.  
- * Drivers are expected to do an ioremap on the PCI MEM resource, but it's 
- * hard to store 0x4 0000 0000 in a 32 bit type.  We require a small patch 
- * to __ioremap to check for addresses between (u32)Au1500_PCI_MEM_START and 
- * (u32)Au1500_PCI_MEM_END and change those to the full 36 bit PCI MEM 
- * addresses.  For PCI IO, it's simpler because we get to do the ioremap 
- * ourselves and then adjust the device's resources.
- */
-#define Au1500_EXT_CFG            0x600000000
-#define Au1500_EXT_CFG_TYPE1      0x680000000
-#define Au1500_PCI_IO_START       0x500000000
-#define Au1500_PCI_IO_END         0x5000FFFFF
-#define Au1500_PCI_MEM_START      0x440000000
-#define Au1500_PCI_MEM_END        0x443FFFFFF
+  /* these are all pseudo physical addresses */
+#define Au1500_EXT_CFG            0x20000000
+#define Au1500_PCI_IO_START       0x70000000
+#define Au1500_PCI_IO_END         0x700FFFFF
+#define Au1500_PCI_MEM_START      0x80000000
+#define Au1500_PCI_MEM_END        0x83FFFFFF
 
 #endif

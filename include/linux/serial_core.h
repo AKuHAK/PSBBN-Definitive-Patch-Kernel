@@ -48,6 +48,7 @@
 #define PORT_SA1100	34
 #define PORT_UART00	35
 #define PORT_21285	37
+#define PORT_DRAGONBALL 110
 
 #ifdef __KERNEL__
 

@@ -28,10 +28,12 @@ if [ "$CONFIG_PCMCIA" != "n" ]; then
       dep_tristate '  HD64465 host bridge support' CONFIG_HD64465_PCMCIA $CONFIG_PCMCIA
    fi
    if [ "$CONFIG_MIPS_AU1000" = "y" ]; then
-      dep_tristate '  Au1x00 pcmcia support' CONFIG_PCMCIA_AU1000 $CONFIG_PCMCIA 
-      if [ "$CONFIG_PCMCIA_AU1000" != "n" ]; then
-        bool '  Pb1x00 board support' CONFIG_PCMCIA_PB1X00
+      if [ "$CONFIG_SNSC_MPU200" = "y" ]; then
+      dep_tristate '  Au1000 support for MPU200' CONFIG_PCMCIA_AU1000 $CONFIG_PCMCIA $CONFIG_SNSC_MPU200
+      else
+      dep_tristate '  Au1000 support' CONFIG_PCMCIA_AU1000 $CONFIG_PCMCIA $CONFIG_MIPS_PB1000
       fi
+      dep_tristate '  Au1500 support' CONFIG_PCMCIA_AU1500 $CONFIG_PCMCIA $CONFIG_MIPS_PB1500
    fi
    if [ "$CONFIG_ARM" = "y" ]; then
       dep_tristate '  CLPS6700 support' CONFIG_PCMCIA_CLPS6700 $CONFIG_ARCH_CLPS711X $CONFIG_PCMCIA

@@ -6,6 +6,9 @@
  * Author: MontaVista Software, Inc.
  *         	stevel@mvista.com or source@mvista.com
  *
+ * Copyright (C) 2001,2002 Sony Corporation.
+ * 	custom board based modification.
+ *
  *  This program is free software; you can redistribute  it and/or modify it
  *  under  the terms of  the GNU General  Public License as published by the
  *  Free Software Foundation;  either version 2 of the  License, or (at your
@@ -42,12 +45,20 @@
  *
  *  Revision history
  *    06.27.2001  Initial version
+ *
  *    03.20.2002  Added mutex locks around read/write methods, to prevent
  *                simultaneous access on SMP or preemptible kernels. Also
  *                removed the counter/pointer fragment aligning at the end
  *                of read/write methods [stevel].
  *    03.21.2002  Add support for coherent DMA on the audio read/write DMA
  *                channels [stevel].
+ *
+ *    2001/09/24  Takuzo O'hara <takuzo@sm.sony.co.jp>
+ *                SNSC initial revision
+ *                - port to SNSC MPU-200
+ *                - 48 kHz, vra=1 only. (default)
+ *                - mixer has to be redone
+ *                  Default value is set at au1000_open()
  *
  */
 #include <linux/version.h>
@@ -74,19 +85,35 @@
 #include <asm/au1000.h>
 #include <asm/au1000_dma.h>
 
+#ifdef CONFIG_SNSC_MPU200
+#include <asm/snsc_mpu200.h>
+#endif
 /* --------------------------------------------------------------------- */
 
 #undef OSS_DOCUMENTED_MIXER_SEMANTICS
 #define AU1000_DEBUG
+#ifdef CONFIG_SNSC_MPU200
+#  define AU1000_VERBOSE_DEBUG
+#  undef USE_PIO_DEBUG
+#else
 #undef AU1000_VERBOSE_DEBUG
+#endif
 
 #define USE_COHERENT_DMA
 
+#ifdef CONFIG_SNSC_MPU200
+#define AU1000_MODULE_NAME "MPU200 AC97"
+#else
 #define AU1000_MODULE_NAME "Au1000 audio"
+#endif
 #define PFX AU1000_MODULE_NAME
 
 #ifdef AU1000_DEBUG
+#ifdef CONFIG_SNSC_MPU200
+#define dbg(format, arg...) do { if (debug) printk(KERN_ERR PFX ": " format "\n" , ## arg); } while (0)
+#else  /* CONFIG_SNSC_MPU200 */
 #define dbg(format, arg...) printk(KERN_DEBUG PFX ": " format "\n" , ## arg)
+#endif /* CONFIG_SNSC_MPU200 */
 #else
 #define dbg(format, arg...) do {} while (0)
 #endif
@@ -104,7 +131,11 @@ static int      vra = 0;	// 0 = no VRA, 1 = use VRA if codec supports it
 MODULE_PARM(vra, "i");
 MODULE_PARM_DESC(vra, "if 1 use VRA if codec supports it");
 
-
+#ifdef CONFIG_SNSC_MPU200
+static int debug = 0;
+MODULE_PARM(debug, "i");
+MODULE_PARM_DESC(debug, "debug = 1 prints msg");
+#endif
 /* --------------------------------------------------------------------- */
 
 struct au1000_state {
@@ -130,6 +161,7 @@ struct au1000_state {
 
 	struct dmabuf {
 		unsigned int    dmanr;	// DMA Channel number
+		int             irq;	// DMA Channel Done IRQ number
 		unsigned        sample_rate;	// Hz
 		unsigned src_factor;     // SRC interp/decimation (no vra)
 		unsigned        sample_size;	// 8 or 16
@@ -163,6 +195,62 @@ struct au1000_state {
 		unsigned        subdivision;
 	} dma_dac      , dma_adc;
 } au1000_state;
+
+
+#ifdef CONFIG_SNSC_MPU200
+/* ---------------------------------------------------------------------
+   SNSC MPU-200 dependent code.
+   --------------------------------------------------------------------- */
+
+#define IO32(a)    (*(volatile unsigned int *)(a))
+static unsigned int dummy;     /* for dummy read */
+
+static void mpu200_ac97_power_on(void)
+{
+	dbg("mpu200_ac97_power_on()");
+	IO32(MPU200_EGPIO1) &= ~MPU200_AC97_SRESET; /* soft reset enable */
+	dummy = IO32(MPU200_EGPIO1); /* wait */
+
+	IO32(MPU200_EGPIO1) &= ~MPU200_AC97_PWRCTL; /* power on */
+	dummy = IO32(MPU200_EGPIO1); /* wait */
+
+	IO32(MPU200_EGPIO1) |= MPU200_AC97_SRESET; /* soft reset disable */
+	dummy = IO32(MPU200_EGPIO1); /* wait */
+
+	udelay(1000);
+}
+
+static void mpu200_ac97_power_off(void)
+{
+	dbg("mpu200_ac97_power_off()");
+	IO32(MPU200_EGPIO1) &= ~MPU200_AC97_SRESET; /* soft reset enable */
+	dummy = IO32(MPU200_EGPIO1); /* wait */
+
+	IO32(MPU200_EGPIO1) |= MPU200_AC97_PWRCTL; /* power off */
+	dummy = IO32(MPU200_EGPIO1); /* wait */
+}
+
+static void mpu200_ac97_soft_reset(void)
+{
+	IO32(MPU200_EGPIO1) &= ~MPU200_AC97_SRESET; /* soft reset enable */
+	dummy = IO32(MPU200_EGPIO1); /* wait */
+
+	IO32(MPU200_EGPIO1) |= MPU200_AC97_SRESET; /* soft reset disable */
+	dummy = IO32(MPU200_EGPIO1); /* wait */
+}
+
+#if 0  /* not used */
+static void mpu200_ac97_mute_on(void)
+{
+	/* XXXX: mute? */
+}
+
+static void mpu200_ac97_mute_off(void)
+{
+	/* XXXX: mute? */
+}
+#endif
+#endif /* CONFIG_SNSC_MPU200 */
 
 /* --------------------------------------------------------------------- */
 
@@ -254,26 +342,29 @@ static u16 rdcodec(struct ac97_codec *codec, u8 addr)
 	spin_lock_irqsave(&s->lock, flags);
 
 	for (i = 0; i < POLL_COUNT; i++)
-		if (!(au_readl(AC97C_STATUS) & AC97C_CP))
+		if (!(inl(AC97C_STATUS) & AC97C_CP))
 			break;
 	if (i == POLL_COUNT)
 		err("rdcodec: codec cmd pending expired!");
 
 	cmd = (u32) addr & AC97C_INDEX_MASK;
 	cmd |= AC97C_READ;	// read command
-	au_writel(cmd, AC97C_CMD);
+	outl(cmd, AC97C_CMD);
 
 	/* now wait for the data */
 	for (i = 0; i < POLL_COUNT; i++)
-		if (!(au_readl(AC97C_STATUS) & AC97C_CP))
+		if (!(inl(AC97C_STATUS) & AC97C_CP))
 			break;
 	if (i == POLL_COUNT) {
 		err("rdcodec: read poll expired!");
 		return 0;
 	}
 
-	data = au_readl(AC97C_CMD) & 0xffff;
+	data = inl(AC97C_CMD) & 0xffff;
 
+#ifdef CONFIG_SNSC_MPU200
+	//    dbg("CMD_RD, cmd = 0x%02x, data = 0x%04x", cmd&0x7F, data);
+#endif
 	spin_unlock_irqrestore(&s->lock, flags);
 
 	return data;
@@ -290,7 +381,7 @@ static void wrcodec(struct ac97_codec *codec, u8 addr, u16 data)
 	spin_lock_irqsave(&s->lock, flags);
 
 	for (i = 0; i < POLL_COUNT; i++)
-		if (!(au_readl(AC97C_STATUS) & AC97C_CP))
+		if (!(inl(AC97C_STATUS) & AC97C_CP))
 			break;
 	if (i == POLL_COUNT)
 		err("wrcodec: codec cmd pending expired!");
@@ -298,7 +389,10 @@ static void wrcodec(struct ac97_codec *codec, u8 addr, u16 data)
 	cmd = (u32) addr & AC97C_INDEX_MASK;
 	cmd &= ~AC97C_READ;	// write command
 	cmd |= ((u32) data << AC97C_WD_BIT);	// OR in the data word
-	au_writel(cmd, AC97C_CMD);
+#ifdef CONFIG_SNSC_MPU200
+	//    dbg("CMD_WR, cmd = 0x%02x, data = 0x%04x", cmd&0x7F, data);
+#endif
+	outl(cmd, AC97C_CMD);
 
 	spin_unlock_irqrestore(&s->lock, flags);
 }
@@ -314,7 +408,7 @@ static void waitcodec(struct ac97_codec *codec)
 
 	// first poll the CODEC_READY tag bit
 	for (i = 0; i < POLL_COUNT; i++)
-		if (au_readl(AC97C_STATUS) & AC97C_READY)
+		if (inl(AC97C_STATUS) & AC97C_READY)
 			break;
 	if (i == POLL_COUNT) {
 		err("waitcodec: CODEC_READY poll expired!");
@@ -361,7 +455,12 @@ static void set_adc_rate(struct au1000_state *s, unsigned rate)
 
 	rate = rate > 48000 ? 48000 : rate;
 
+#ifdef CONFIG_SNSC_MPU200
+	// if codec supports VRA, ensure using VRA
+	if (s->no_vra==0)
+#else
 	// enable VRA
+#endif
 	wrcodec(&s->codec, AC97_EXTENDED_STATUS,
 		ac97_extstat | AC97_EXTSTAT_VRA);
 	// now write the sample rate
@@ -443,7 +542,7 @@ static void stop_dac(struct au1000_state *s)
 	spin_lock_irqsave(&s->lock, flags);
 
 	disable_dma(db->dmanr);
-	
+
 	db->stopped = 1;
 
 	spin_unlock_irqrestore(&s->lock, flags);
@@ -460,7 +559,7 @@ static void  stop_adc(struct au1000_state *s)
 	spin_lock_irqsave(&s->lock, flags);
 
 	disable_dma(db->dmanr);
-	
+
 	db->stopped = 1;
 
 	spin_unlock_irqrestore(&s->lock, flags);
@@ -469,27 +568,27 @@ static void  stop_adc(struct au1000_state *s)
 
 static void set_xmit_slots(int num_channels)
 {
-	u32 ac97_config = au_readl(AC97C_CONFIG) & ~AC97C_XMIT_SLOTS_MASK;
+	u32 ac97_config = inl(AC97C_CONFIG) & ~AC97C_XMIT_SLOTS_MASK;
 
 	switch (num_channels) {
-	case 1:	// mono
-	case 2:	// stereo, slots 3,4
+	case 1:		// mono
+	case 2:		// stereo, slots 3,4
 		ac97_config |= (0x3 << AC97C_XMIT_SLOTS_BIT);
 		break;
-	case 4:	// stereo with surround, slots 3,4,7,8
+	case 4:		// stereo with surround, slots 3,4,7,8
 		ac97_config |= (0x33 << AC97C_XMIT_SLOTS_BIT);
 		break;
-	case 6:	// stereo with surround and center/LFE, slots 3,4,6,7,8,9
+	case 6:		// stereo with surround and center/LFE, slots 3,4,6,7,8,9
 		ac97_config |= (0x7b << AC97C_XMIT_SLOTS_BIT);
 		break;
 	}
 
-	au_writel(ac97_config, AC97C_CONFIG);
+	outl(ac97_config, AC97C_CONFIG);
 }
 
 static void     set_recv_slots(int num_channels)
 {
-	u32 ac97_config = au_readl(AC97C_CONFIG) & ~AC97C_RECV_SLOTS_MASK;
+	u32 ac97_config = inl(AC97C_CONFIG) & ~AC97C_RECV_SLOTS_MASK;
 
 	/*
 	 * Always enable slots 3 and 4 (stereo). Slot 6 is
@@ -497,7 +596,7 @@ static void     set_recv_slots(int num_channels)
 	 */
 	ac97_config |= (0x3 << AC97C_RECV_SLOTS_BIT);
 
-	au_writel(ac97_config, AC97C_CONFIG);
+	outl(ac97_config, AC97C_CONFIG);
 }
 
 static void start_dac(struct au1000_state *s)
@@ -511,7 +610,7 @@ static void start_dac(struct au1000_state *s)
 
 	spin_lock_irqsave(&s->lock, flags);
 
-	au_readl(AC97C_STATUS);	// read status to clear sticky bits
+	inl(AC97C_STATUS);	// read status to clear sticky bits
 
 	// reset Buffer 1 and 2 pointers to nextOut and nextOut+dma_fragsize
 	buf1 = virt_to_phys(db->nextOut);
@@ -521,23 +620,22 @@ static void start_dac(struct au1000_state *s)
 
 	set_xmit_slots(db->num_channels);
 
-	init_dma(db->dmanr);
+	set_dma_count(db->dmanr, db->dma_fragsize>>1);
 	if (get_dma_active_buffer(db->dmanr) == 0) {
-		clear_dma_done0(db->dmanr);	// clear DMA done bit
 		set_dma_addr0(db->dmanr, buf1);
 		set_dma_addr1(db->dmanr, buf2);
 	} else {
-		clear_dma_done1(db->dmanr);	// clear DMA done bit
 		set_dma_addr1(db->dmanr, buf1);
 		set_dma_addr0(db->dmanr, buf2);
 	}
-	set_dma_count(db->dmanr, db->dma_fragsize>>1);
 	enable_dma_buffers(db->dmanr);
-	
-	start_dma(db->dmanr);
-	
+
+	enable_dma(db->dmanr);
+
 #ifdef AU1000_VERBOSE_DEBUG
+#ifndef CONFIG_SNSC_MPU200
 	dump_au1000_dma_channel(db->dmanr);
+#endif /* CONFIG_SNSC_MPU200 */
 #endif
 
 	db->stopped = 0;
@@ -556,7 +654,7 @@ static void start_adc(struct au1000_state *s)
 
 	spin_lock_irqsave(&s->lock, flags);
 
-	au_readl(AC97C_STATUS);	// read status to clear sticky bits
+	inl(AC97C_STATUS);	// read status to clear sticky bits
 
 	// reset Buffer 1 and 2 pointers to nextIn and nextIn+dma_fragsize
 	buf1 = virt_to_phys(db->nextIn);
@@ -566,23 +664,22 @@ static void start_adc(struct au1000_state *s)
 
 	set_recv_slots(db->num_channels);
 
-	init_dma(db->dmanr);
+	set_dma_count(db->dmanr, db->dma_fragsize>>1);
 	if (get_dma_active_buffer(db->dmanr) == 0) {
-		clear_dma_done0(db->dmanr);	// clear DMA done bit
 		set_dma_addr0(db->dmanr, buf1);
 		set_dma_addr1(db->dmanr, buf2);
 	} else {
-		clear_dma_done1(db->dmanr);	// clear DMA done bit
 		set_dma_addr1(db->dmanr, buf1);
 		set_dma_addr0(db->dmanr, buf2);
 	}
-	set_dma_count(db->dmanr, db->dma_fragsize>>1);
 	enable_dma_buffers(db->dmanr);
 
-	start_dma(db->dmanr);
-	
+	enable_dma(db->dmanr);
+
 #ifdef AU1000_VERBOSE_DEBUG
+#ifndef CONFIG_SNSC_MPU200
 	dump_au1000_dma_channel(db->dmanr);
+#endif /* CONFIG_SNSC_MPU200 */
 #endif
 
 	db->stopped = 0;
@@ -683,6 +780,9 @@ static int prog_dmabuf(struct au1000_state *s, struct dmabuf *db)
 	memset(db->rawbuf, 0, bufs);
 
 #ifdef AU1000_VERBOSE_DEBUG
+#ifdef CONFIG_SNSC_MPU200
+	dbg(__FUNCTION__ ": set to %d Hz", rdcodec(&s->codec, AC97_PCM_FRONT_DAC_RATE));
+#endif
 	dbg("rate=%d, samplesize=%d, channels=%d",
 	    rate, db->sample_size, db->num_channels);
 	dbg("fragsize=%d, cnt_factor=%d, dma_fragsize=%d",
@@ -716,14 +816,38 @@ static void dac_dma_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	unsigned long   newptr;
 	u32 ac97c_stat, buff_done;
 
-	ac97c_stat = au_readl(AC97C_STATUS);
+	ac97c_stat = inl(AC97C_STATUS);
 #ifdef AU1000_VERBOSE_DEBUG
+#ifdef CONFIG_SNSC_MPU200
+	if (ac97c_stat & (AC97C_XU|AC97C_XO|AC97C_TE)) {
+		dbg("AC97C status = 0x%08x", ac97c_stat);
+		dbg("             = %s%s%s%s%s%s%s%s%s%s",
+		   (ac97c_stat & AC97C_XU) ? "XU " : "",
+		   (ac97c_stat & AC97C_XO) ? "XO " : "",
+		   (ac97c_stat & AC97C_RU) ? "RU " : "",
+		   (ac97c_stat & AC97C_RO) ? "RO " : "",
+		   (ac97c_stat & AC97C_READY) ? "RD " : "",
+		   (ac97c_stat & AC97C_CP) ? "CP " : "",
+		   (ac97c_stat & AC97C_TE) ? "TE " : "",
+		   (ac97c_stat & AC97C_TF) ? "TF " : "",
+		   (ac97c_stat & AC97C_RE) ? "RE " : "",
+		   (ac97c_stat & AC97C_RF) ? "RF " : "");
+		outl(0x0, AC97C_STATUS);
+	}
+#else  /* CONFIG_SNSC_MPU200 */
 	if (ac97c_stat & (AC97C_XU | AC97C_XO | AC97C_TE))
 		dbg("AC97C status = 0x%08x", ac97c_stat);
+#endif /* CONFIG_SNSC_MPU200 */
 #endif
 
 	if ((buff_done = get_dma_buffer_done(dac->dmanr)) == 0) {
 		/* fastpath out, to ease interrupt sharing */
+#ifdef CONFIG_SNSC_MPU200
+#if 0
+		dbg("buff_done = %d", buff_done);
+		dbg("dma mode = 0x%08x", get_dma_mode_xx(dac->dmanr));
+#endif
+#endif
 		return;
 	}
 
@@ -797,14 +921,38 @@ static void adc_dma_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	unsigned long   newptr;
 	u32 ac97c_stat, buff_done;
 
-	ac97c_stat = au_readl(AC97C_STATUS);
+	ac97c_stat = inl(AC97C_STATUS);
 #ifdef AU1000_VERBOSE_DEBUG
+#ifdef CONFIG_SNSC_MPU200
+	if (ac97c_stat & (AC97C_RU|AC97C_RO)) {
+		dbg("AC97C status = 0x%08x", ac97c_stat);
+		dbg("             = %s%s%s%s%s%s%s%s%s%s",
+		   (ac97c_stat & AC97C_XU) ? "XU " : "",
+		   (ac97c_stat & AC97C_XO) ? "XO " : "",
+		   (ac97c_stat & AC97C_RU) ? "RU " : "",
+		   (ac97c_stat & AC97C_RO) ? "RO " : "",
+		   (ac97c_stat & AC97C_READY) ? "RD " : "",
+		   (ac97c_stat & AC97C_CP) ? "CP " : "",
+		   (ac97c_stat & AC97C_TE) ? "TE " : "",
+		   (ac97c_stat & AC97C_TF) ? "TF " : "",
+		   (ac97c_stat & AC97C_RE) ? "RE " : "",
+		   (ac97c_stat & AC97C_RF) ? "RF " : "");
+		outl(0x0, AC97C_STATUS);
+	}
+#else  /* CONFIG_SNSC_MPU200 */
 	if (ac97c_stat & (AC97C_RU | AC97C_RO))
 		dbg("AC97C status = 0x%08x", ac97c_stat);
+#endif /* CONFIG_SNSC_MPU200 */
 #endif
 
 	if ((buff_done = get_dma_buffer_done(adc->dmanr)) == 0) {
 		/* fastpath out, to ease interrupt sharing */
+#ifdef CONFIG_SNSC_MPU200
+#if 0
+		dbg("buff_done = %d", buff_done);
+		dbg("dma mode = 0x%08x", get_dma_mode_xx(dac->dmanr));
+#endif
+#endif
 		return;
 	}
 
@@ -907,6 +1055,28 @@ static int au1000_ioctl_mixdev(struct inode *inode, struct file *file,
 	struct au1000_state *s = (struct au1000_state *)file->private_data;
 	struct ac97_codec *codec = &s->codec;
 
+#ifdef CONFIG_SNSC_MPU200
+	int len, err;
+
+	if (_SIOC_DIR(cmd) != _SIOC_NONE && _SIOC_DIR(cmd) != 0) {
+		/*
+		* Have to validate the address given by the process.
+		*/
+		len = _SIOC_SIZE(cmd);
+		if (len < 1 || len > 65536 || arg == 0)
+			return -EFAULT;
+		if (_SIOC_DIR(cmd) & _SIOC_WRITE)
+			if ((err = verify_area(VERIFY_READ, (void *)arg, len)) <0)
+				return err;
+		if (_SIOC_DIR(cmd) & _SIOC_READ)
+			if ((err = verify_area(VERIFY_WRITE, (void *)arg, len))< 0)
+				return err;
+	}
+	/* unaligned data access */
+	if (arg & 0x3)
+		return -EFAULT;
+#endif /* CONFIG_SNSC_MPU200 */
+
 	return mixdev_ioctl(codec, cmd, arg);
 }
 
@@ -943,7 +1113,6 @@ static int drain_dac(struct au1000_state *s, int nonblock)
 		tmo /= s->dma_dac.dma_bytes_per_sample;
 		au1000_delay(tmo);
 	}
-
 	if (signal_pending(current))
 		return -ERESTARTSYS;
 	return 0;
@@ -991,7 +1160,7 @@ static int translate_from_user(struct dmabuf *db,
 	for (sample = 0; sample < num_samples; sample++) {
 		if (copy_from_user(usersample, userbuf,
 				   db->user_bytes_per_sample)) {
-			dbg(__FUNCTION__ ": fault");
+			dbg(__FUNCTION__ "fault");
 			return -EFAULT;
 		}
 
@@ -1055,7 +1224,7 @@ static int translate_to_user(struct dmabuf *db,
 
 		if (copy_to_user(userbuf, usersample,
 				 db->user_bytes_per_sample)) {
-			dbg(__FUNCTION__ ": fault");
+			dbg(__FUNCTION__ "fault");
 			return -EFAULT;
 		}
 
@@ -1192,6 +1361,47 @@ out2:
 	return ret;
 }
 
+#ifdef USE_PIO_DEBUG
+#ifdef CONFIG_SNSC_MPU200
+#define AUDIO_BUF_LEN 1024*1024
+static ssize_t au1000_write(struct file *file, const char *buffer,
+			    size_t count, loff_t *ppos)
+{
+	unsigned char data[AUDIO_BUF_LEN];
+	struct au1000_state *s = (struct au1000_state *)file->private_data;
+	struct dmabuf* db = &s->dma_dac;
+	int size, offset;
+
+	if (ppos != &file->f_pos)
+		return -ESPIPE;
+	if (!access_ok(VERIFY_READ, buffer, count))
+		return -EFAULT;
+
+	size = (count < AUDIO_BUF_LEN) ? count : AUDIO_BUF_LEN;
+	copy_from_user(data, buffer, size);
+
+	set_xmit_slots(db->num_channels);
+	for (offset=0; offset < size; offset+=4) {
+		/* wait until while TX is empty */
+
+		while (!(inl(AC97C_STATUS) & AC97C_TE)) {
+			if (signal_pending (current))
+				return -ERESTARTSYS;
+		} 
+
+		if (inl(AC97C_STATUS) & AC97C_RU) {
+			outl(0xffff, AC97C_DATA);
+			outl(0xffff, AC97C_DATA);
+			dbg("Buffer UnderRun\n");
+		}
+
+		outl(*(unsigned int *)(data+offset)       & 0xffff, AC97C_DATA);
+		outl(*(unsigned int *)(data+offset) >> 16 & 0xffff, AC97C_DATA);
+	}
+	return size;
+}
+#endif /* CONFIG_SNSC_MPU200 */
+#else  /* not USE_PIO_DEBUG */
 static ssize_t au1000_write(struct file *file, const char *buffer,
 	     		    size_t count, loff_t * ppos)
 {
@@ -1274,6 +1484,7 @@ out2:
 	set_current_state(TASK_RUNNING);
 	return ret;
 }
+#endif /* USE_PIO_DEBUG */
 
 
 /* No kernel lock - we have our own spinlock */
@@ -1470,6 +1681,9 @@ static int au1000_ioctl(struct inode *inode, struct file *file,
 	case SNDCTL_DSP_SPEED:
 		if (get_user(val, (int *) arg))
 			return -EFAULT;
+#ifdef CONFIG_SNSC_MPU200
+		dbg("  val = %d\n", val);
+#endif
 		if (val >= 0) {
 			if (file->f_mode & FMODE_READ) {
 				stop_adc(s);
@@ -1486,6 +1700,10 @@ static int au1000_ioctl(struct inode *inode, struct file *file,
 				if ((ret = prog_dmabuf_dac(s)))
 					return ret;
 		}
+#ifdef CONFIG_SNSC_MPU200
+		dbg("  retval = %d\n", (file->f_mode & FMODE_READ) ?
+		   s->dma_adc.sample_rate : s->dma_dac.sample_rate);
+#endif
 		return put_user((file->f_mode & FMODE_READ) ?
 				s->dma_adc.sample_rate :
 				s->dma_dac.sample_rate,
@@ -1494,6 +1712,9 @@ static int au1000_ioctl(struct inode *inode, struct file *file,
 	case SNDCTL_DSP_STEREO:
 		if (get_user(val, (int *) arg))
 			return -EFAULT;
+#ifdef CONFIG_SNSC_MPU200
+		dbg("  val = %d\n", val);
+#endif
 		if (file->f_mode & FMODE_READ) {
 			stop_adc(s);
 			s->dma_adc.num_channels = val ? 2 : 1;
@@ -1513,7 +1734,14 @@ static int au1000_ioctl(struct inode *inode, struct file *file,
 						    AC97_EXTSTAT_PRK));
 			}
 			if ((ret = prog_dmabuf_dac(s)))
+#ifdef CONFIG_SNSC_MPU200
+			{
+				dbg("  retval = %d\n", ret);
+#endif /* CONFIG_SNSC_MPU200 */
 				return ret;
+#ifdef CONFIG_SNSC_MPU200
+			}
+#endif /* CONFIG_SNSC_MPU200 */
 		}
 		return 0;
 
@@ -1591,8 +1819,12 @@ static int au1000_ioctl(struct inode *inode, struct file *file,
 		return put_user(AFMT_S16_LE | AFMT_U8, (int *) arg);
 
 	case SNDCTL_DSP_SETFMT:	/* Selects ONE fmt */
+		/* case SNDCTL_DSP_SAMPLESIZE: */
 		if (get_user(val, (int *) arg))
 			return -EFAULT;
+#ifdef CONFIG_SNSC_MPU200
+		dbg("  val = %d\n", val);
+#endif
 		if (val != AFMT_QUERY) {
 			if (file->f_mode & FMODE_READ) {
 				stop_adc(s);
@@ -1617,6 +1849,9 @@ static int au1000_ioctl(struct inode *inode, struct file *file,
 					return ret;
 			}
 		} else {
+#ifdef CONFIG_SNSC_MPU200
+			dbg("  val = AFMT_QUERY\n");
+#endif
 			if (file->f_mode & FMODE_READ)
 				val = (s->dma_adc.sample_size == 16) ?
 					AFMT_S16_LE : AFMT_U8;
@@ -1624,6 +1859,9 @@ static int au1000_ioctl(struct inode *inode, struct file *file,
 				val = (s->dma_dac.sample_size == 16) ?
 					AFMT_S16_LE : AFMT_U8;
 		}
+#ifdef CONFIG_SNSC_MPU200
+		dbg("  retval = %d\n", val);
+#endif
 		return put_user(val, (int *) arg);
 
 	case SNDCTL_DSP_POST:
@@ -1755,6 +1993,9 @@ static int au1000_ioctl(struct inode *inode, struct file *file,
 		return copy_to_user((void *) arg, &cinfo, sizeof(cinfo));
 
 	case SNDCTL_DSP_GETBLKSIZE:
+#ifdef CONFIG_SNSC_MPU200
+		dbg("  fragsize = %d\n", s->dma_dac.fragsize);
+#endif /* CONFIG_SNSC_MPU200 */
 		if (file->f_mode & FMODE_WRITE)
 			return put_user(s->dma_dac.fragsize, (int *) arg);
 		else
@@ -1885,6 +2126,10 @@ static int  au1000_open(struct inode *inode, struct file *file)
 		set_adc_rate(s, 8000);
 		if ((minor & 0xf) == SND_DEV_DSP16)
 			s->dma_adc.sample_size = 16;
+#ifdef CONIG_SNSC_MPU200
+		if ((minor & 0xf) == SND_DEV_DSP16)
+			dbg("setting to SND_DEV_DSP16\n");
+#endif /* CONIG_SNSC_MPU200 */
 	}
 
 	if (file->f_mode & FMODE_WRITE) {
@@ -1917,13 +2162,8 @@ static int au1000_release(struct inode *inode, struct file *file)
 	struct au1000_state *s = (struct au1000_state *)file->private_data;
 
 	lock_kernel();
-	
-	if (file->f_mode & FMODE_WRITE) {
-		unlock_kernel();
+	if (file->f_mode & FMODE_WRITE)
 		drain_dac(s, file->f_flags & O_NONBLOCK);
-		lock_kernel();
-	}
-
 	down(&s->open_sem);
 	if (file->f_mode & FMODE_WRITE) {
 		stop_dac(s);
@@ -1935,9 +2175,7 @@ static int au1000_release(struct inode *inode, struct file *file)
 	}
 	s->open_mode &= ((~file->f_mode) & (FMODE_READ|FMODE_WRITE));
 	up(&s->open_sem);
-
 	wake_up(&s->open_wait);
-
 	unlock_kernel();
 	return 0;
 }
@@ -1973,17 +2211,22 @@ static int proc_au1000_dump(char *buf, char **start, off_t fpos,
 	int             cnt, len = 0;
 
 	/* print out header */
+#ifdef CONFIG_SNSC_MPU200
+	len += sprintf(buf + len, "\n\t\tMPU200 AC97 Audio Debug\n\n");
+#else
 	len += sprintf(buf + len, "\n\t\tAU1000 Audio Debug\n\n");
+#endif
 
 	// print out digital controller state
+#ifdef CONFIG_SNSC_MPU200
+	len += sprintf(buf + len, "MPU200 AC97 Audio Controller registers\n");
+#else
 	len += sprintf(buf + len, "AU1000 Audio Controller registers\n");
+#endif
 	len += sprintf(buf + len, "---------------------------------\n");
-	len += sprintf (buf + len, "AC97C_CONFIG = %08x\n",
-			au_readl(AC97C_CONFIG));
-	len += sprintf (buf + len, "AC97C_STATUS = %08x\n",
-			au_readl(AC97C_STATUS));
-	len += sprintf (buf + len, "AC97C_CNTRL  = %08x\n",
-			au_readl(AC97C_CNTRL));
+	len += sprintf (buf + len, "AC97C_CONFIG = %08x\n", inl(AC97C_CONFIG));
+	len += sprintf (buf + len, "AC97C_STATUS = %08x\n", inl(AC97C_STATUS));
+	len += sprintf (buf + len, "AC97C_CNTRL  = %08x\n", inl(AC97C_CNTRL));
 
 	/* print out CODEC state */
 	len += sprintf(buf + len, "\nAC97 CODEC registers\n");
@@ -2009,7 +2252,11 @@ static int proc_au1000_dump(char *buf, char **start, off_t fpos,
 /* --------------------------------------------------------------------- */
 
 MODULE_AUTHOR("Monta Vista Software, stevel@mvista.com");
+#ifdef CONFIG_SNSC_MPU200
+MODULE_DESCRIPTION("MPU200 AC97 Audio Driver");
+#else
 MODULE_DESCRIPTION("Au1000 Audio Driver");
+#endif
 
 /* --------------------------------------------------------------------- */
 
@@ -2039,24 +2286,18 @@ static int __devinit au1000_probe(void)
 	}
 	// Allocate the DMA Channels
 	if ((s->dma_dac.dmanr = request_au1000_dma(DMA_ID_AC97C_TX,
-						   "audio DAC",
-						   dac_dma_interrupt,
-						   SA_INTERRUPT, s)) < 0) {
+						   "audio DAC")) < 0) {
 		err("Can't get DAC DMA");
 		goto err_dma1;
 	}
 	if ((s->dma_adc.dmanr = request_au1000_dma(DMA_ID_AC97C_RX,
-						   "audio ADC",
-						   adc_dma_interrupt,
-						   SA_INTERRUPT, s)) < 0) {
+						   "audio ADC")) < 0) {
 		err("Can't get ADC DMA");
 		goto err_dma2;
 	}
 
-	info("DAC: DMA%d/IRQ%d, ADC: DMA%d/IRQ%d",
-	     s->dma_dac.dmanr, get_dma_done_irq(s->dma_dac.dmanr),
-	     s->dma_adc.dmanr, get_dma_done_irq(s->dma_adc.dmanr));
-
+	s->dma_dac.irq = get_dma_done_irq(s->dma_dac.dmanr);
+	s->dma_adc.irq = get_dma_done_irq(s->dma_adc.dmanr);
 #ifdef USE_COHERENT_DMA
 	// enable DMA coherency in read/write DMA channels
 	set_dma_mode(s->dma_dac.dmanr,
@@ -2071,6 +2312,21 @@ static int __devinit au1000_probe(void)
 		     get_dma_mode(s->dma_adc.dmanr) | DMA_NC);
 #endif
 	
+	if (request_irq(s->dma_dac.irq, dac_dma_interrupt,
+			SA_INTERRUPT, "audio DAC", s)) {
+		err("Can't get DAC irq #%d", s->dma_dac.irq);
+		goto err_irq1;
+	}
+	if (request_irq(s->dma_adc.irq, adc_dma_interrupt,
+			SA_INTERRUPT, "audio ADC", s)) {
+		err("Can't get ADC irq #%d", s->dma_adc.irq);
+		goto err_irq2;
+	}
+
+	info("DAC: DMA%d/IRQ%d, ADC: DMA%d/IRQ%d",
+	     s->dma_dac.dmanr, s->dma_dac.irq,
+	     s->dma_adc.dmanr, s->dma_adc.irq);
+
 	/* register devices */
 
 	if ((s->dev_audio = register_sound_dsp(&au1000_audio_fops, -1)) < 0)
@@ -2086,26 +2342,29 @@ static int __devinit au1000_probe(void)
 #endif /* AU1000_DEBUG */
 
 	// configure pins for AC'97
-	au_writel(au_readl(SYS_PINFUNC) & ~0x02, SYS_PINFUNC);
+	outl(inl(SYS_PINFUNC) & ~0x02, SYS_PINFUNC);
 
 	// Assert reset for 10msec to the AC'97 controller, and enable clock
-	au_writel(AC97C_RS | AC97C_CE, AC97C_CNTRL);
+	outl(AC97C_RS | AC97C_CE, AC97C_CNTRL);
 	au1000_delay(10);
-	au_writel(AC97C_CE, AC97C_CNTRL);
+	outl(AC97C_CE, AC97C_CNTRL);
 	au1000_delay(10);	// wait for clock to stabilize
 
 	/* cold reset the AC'97 */
-	au_writel(AC97C_RESET, AC97C_CONFIG);
+#ifdef CONFIG_SNSC_MPU200
+	mpu200_ac97_soft_reset();
+#endif
+	outl(AC97C_RESET, AC97C_CONFIG);
 	au1000_delay(10);
-	au_writel(0, AC97C_CONFIG);
+	outl(0, AC97C_CONFIG);
 	/* need to delay around 500msec(bleech) to give
 	   some CODECs enough time to wakeup */
 	au1000_delay(500);
 
 	/* warm reset the AC'97 to start the bitclk */
-	au_writel(AC97C_SG | AC97C_SYNC, AC97C_CONFIG);
+	outl(AC97C_SG | AC97C_SYNC, AC97C_CONFIG);
 	udelay(100);
-	au_writel(0, AC97C_CONFIG);
+	outl(0, AC97C_CONFIG);
 
 	/* codec init */
 	if (!ac97_probe_codec(&s->codec))
@@ -2141,15 +2400,22 @@ static int __devinit au1000_probe(void)
 		wrcodec(&s->codec, AC97_EXTENDED_STATUS,
 			ac97_extstat & ~AC97_EXTSTAT_VRA);
 		s->no_vra = 1;
+#ifdef CONFIG_SNSC_MPU200
+		info("VRA disabling vra bit.");
+	} else {	/* vra != 0 */
+		s->no_vra = 0;
+#endif
 	}
 	if (s->no_vra)
 		info("no VRA, interpolating and decimating");
 
+#ifdef CONFIG_SNSC_MPU200
+	dbg("General Purpose IO(0x20) = 0x%04x", rdcodec(&s->codec, 0x20)); /* General Purpose IO */
+#endif
 	/* set mic to be the recording source */
 	val = SOUND_MASK_MIC;
 	mixdev_ioctl(&s->codec, SOUND_MIXER_WRITE_RECSRC,
 		     (unsigned long) &val);
-
 #ifdef AU1000_DEBUG
 	sprintf(proc_str, "driver/%s/%d/ac97", AU1000_MODULE_NAME,
 		s->codec.id);
@@ -2168,6 +2434,10 @@ static int __devinit au1000_probe(void)
  err_dma2:
 	free_au1000_dma(s->dma_dac.dmanr);
  err_dma1:
+	free_irq(s->dma_adc.irq, s);
+ err_irq2:
+	free_irq(s->dma_dac.irq, s);
+ err_irq1:
 	release_region(virt_to_phys((void *) AC97C_CONFIG), 0x14);
 	return -1;
 }
@@ -2183,6 +2453,8 @@ static void __devinit au1000_remove(void)
 		remove_proc_entry(AU1000_MODULE_NAME, NULL);
 #endif /* AU1000_DEBUG */
 	synchronize_irq();
+	free_irq(s->dma_adc.irq, s);
+	free_irq(s->dma_dac.irq, s);
 	free_au1000_dma(s->dma_adc.dmanr);
 	free_au1000_dma(s->dma_dac.dmanr);
 	release_region(virt_to_phys((void *) AC97C_CONFIG), 0x14);
@@ -2193,6 +2465,9 @@ static void __devinit au1000_remove(void)
 static int __init init_au1000(void)
 {
 	info("stevel@mvista.com, built " __TIME__ " on " __DATE__);
+#ifdef CONFIG_SNSC_MPU200
+	mpu200_ac97_power_on();
+#endif
 	return au1000_probe();
 }
 
@@ -2200,6 +2475,9 @@ static void __exit cleanup_au1000(void)
 {
 	info("unloading");
 	au1000_remove();
+#ifdef CONFIG_SNSC_MPU200
+	mpu200_ac97_power_off();
+#endif
 }
 
 module_init(init_au1000);

@@ -144,6 +144,7 @@ static const struct {
 	{0x83847609, "SigmaTel STAC9721/23",	&sigmatel_9721_ops},
 	{0x83847644, "SigmaTel STAC9744/45",	&sigmatel_9744_ops},
 	{0x83847656, "SigmaTel STAC9756/57",	&sigmatel_9744_ops},
+	{0x83847666, "SigmaTel STAC9766/67",    &null_ops},
 	{0x83847684, "SigmaTel STAC9783/84?",	&null_ops},
 	{0x57454301, "Winbond 83971D",		&null_ops},
 };

@@ -10,7 +10,7 @@
  * - added inflateIncomp and deflateOutputPending
  * - allow strm->next_out to be NULL, meaning discard the output
  *
- * $Id: zlib.c,v 1.2 2002/02/27 02:15:16 trini Exp $
+ * $Id: zlib.c,v 1.3 2002/04/25 00:32:46 trini Exp $
  */
 
 /* 
@@ -67,29 +67,6 @@
 #include <linux/module.h>   /* EXPORT_SYMBOL */
 #include <linux/string.h>
 #define HAVE_MEMCPY
-
-/* Exports for a linux kernel. */
-EXPORT_SYMBOL(deflate);
-EXPORT_SYMBOL(deflateInit_);
-EXPORT_SYMBOL(deflateInit2_);
-EXPORT_SYMBOL(deflateEnd);
-EXPORT_SYMBOL(deflateSetDictionary);
-EXPORT_SYMBOL(deflateCopy);
-EXPORT_SYMBOL(deflateReset);
-EXPORT_SYMBOL(deflateParams);
-EXPORT_SYMBOL(deflateOutputPending);
-EXPORT_SYMBOL(inflate);
-EXPORT_SYMBOL(inflateInit_);
-EXPORT_SYMBOL(inflateInit2_);
-EXPORT_SYMBOL(inflateEnd);
-EXPORT_SYMBOL(inflateSetDictionary);
-EXPORT_SYMBOL(inflateSync);
-EXPORT_SYMBOL(inflateReset);
-EXPORT_SYMBOL(inflateIncomp);
-EXPORT_SYMBOL(adler32);
-#ifdef MODULE_LICENSE
-MODULE_LICENSE("BSD without advertisement clause");
-#endif
 
 #else /* not kernel */
 
@@ -5399,3 +5376,28 @@ uLong adler32(adler, buf, len)
     return (s2 << 16) | s1;
 }
 /* --- adler32.c */
+
+#if defined(__KERNEL__)
+/* Exports for a linux kernel. */
+EXPORT_SYMBOL(deflate);
+EXPORT_SYMBOL(deflateInit_);
+EXPORT_SYMBOL(deflateInit2_);
+EXPORT_SYMBOL(deflateEnd);
+EXPORT_SYMBOL(deflateSetDictionary);
+EXPORT_SYMBOL(deflateCopy);
+EXPORT_SYMBOL(deflateReset);
+EXPORT_SYMBOL(deflateParams);
+EXPORT_SYMBOL(deflateOutputPending);
+EXPORT_SYMBOL(inflate);
+EXPORT_SYMBOL(inflateInit_);
+EXPORT_SYMBOL(inflateInit2_);
+EXPORT_SYMBOL(inflateEnd);
+EXPORT_SYMBOL(inflateSetDictionary);
+EXPORT_SYMBOL(inflateSync);
+EXPORT_SYMBOL(inflateReset);
+EXPORT_SYMBOL(inflateIncomp);
+EXPORT_SYMBOL(adler32);
+#ifdef MODULE_LICENSE
+MODULE_LICENSE("BSD without advertisement clause");
+#endif
+#endif

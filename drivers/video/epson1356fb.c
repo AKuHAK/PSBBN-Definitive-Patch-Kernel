@@ -42,7 +42,7 @@
 #include <linux/string.h>
 #include <linux/mm.h>
 #include <linux/tty.h>
-#include <linux/slab.h>
+#include <linux/malloc.h>
 #include <linux/vmalloc.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -57,11 +57,6 @@
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <linux/timer.h>
-#include <linux/pagemap.h>
-
-#include <asm/pgalloc.h>
-#include <asm/uaccess.h>
-#include <asm/tlb.h>
 
 #ifdef CONFIG_MTRR
 #include <asm/mtrr.h>
@@ -215,8 +210,6 @@ static struct fb_info_e1356 fb_info;
 static struct e1356fb_fix boot_fix; // boot options
 static struct e1356fb_par boot_par; // boot options
 
-static int e1356_remap_page_range(unsigned long from, phys_t phys_addr, unsigned long size, pgprot_t prot);
-
 
 /* ------------------------------------------------------------------------- 
  *                      Hardware-specific funcions
@@ -269,6 +262,13 @@ static struct fb_videomode panel_modedb[] = {
 		NULL, 109, 320, 240, KHZ2PICOS(MAX_PIXCLOCK/3),
 		16, 16, 32, 24, 48, 8,
 		0, FB_VMODE_NONINTERLACED
+#ifdef CONFIG_SNSC_MPU200
+	}, {
+		/* 640x480 @ 60 Hz, 31.5 kHz hsync */
+		/* imported frm modedb.c and modified for MPU-200 */
+		NULL, 60, 640, 480, 39721, 38, 16, 33, 10, 96, 2,
+		0, FB_VMODE_NONINTERLACED
+#endif /* CONFIG_SNSC_MPU200 */
 	}, {
 		/* 640x480 @ 84 Hz, 48.1 kHz hsync */
 		NULL, 84, 640, 480, KHZ2PICOS(MAX_PIXCLOCK/1),
@@ -297,6 +297,13 @@ static struct fb_videomode crt_modedb[] = {
 		NULL, 77, 512, 384, KHZ2PICOS(MAX_PIXCLOCK/2),
 		48, 16, 16, 1, 64, 3,
 		0, FB_VMODE_NONINTERLACED
+#ifdef CONFIG_SNSC_MPU200
+	}, {
+		/* 640x480 @ 60 Hz, 31.5 kHz hsync */
+		/* imported frm modedb.c and modified for MPU-200 */
+		NULL, 60, 640, 480, 39721, 38, 16, 33, 10, 96, 2,
+		0, FB_VMODE_NONINTERLACED
+#endif /* CONFIG_SNSC_MPU200 */
 	}, {
 		/* 640x400 @ 88 Hz, 43.1 kHz hsync */
 		NULL, 88, 640, 400, KHZ2PICOS(MAX_PIXCLOCK/1),
@@ -2078,11 +2085,7 @@ e1356fb_mmap(struct fb_info *fb,
 {
 	struct fb_info_e1356 *info = (struct fb_info_e1356*)fb;
 	unsigned int len;
-#if defined(CONFIG_64BIT_PHYS_ADDR) && defined(CONFIG_CPU_MIPS32)
-	u64 start=0, off;
-#else
 	unsigned long start=0, off;
-#endif
 
 	if (vma->vm_pgoff > (~0UL >> PAGE_SHIFT)) {
 		DPRINTK("invalid vma->vm_pgoff\n");
@@ -2163,17 +2166,10 @@ e1356fb_mmap(struct fb_info *fb,
 	if (info->fix.mmunalign)
 		vma->vm_start += 2;
 	
-#if defined(CONFIG_64BIT_PHYS_ADDR) && defined(CONFIG_CPU_MIPS32)
-	if (e1356_remap_page_range(vma->vm_start, off,
-				vma->vm_end - vma->vm_start,
-				vma->vm_page_prot))
-		return -EAGAIN;
-#else
 	if (io_remap_page_range(vma->vm_start, off,
 				vma->vm_end - vma->vm_start,
 				vma->vm_page_prot))
 		return -EAGAIN;
-#endif
 
 	info->mmaped = 1;
 	return 0;
@@ -2338,7 +2334,7 @@ e1356fb_init(void)
 	 */
 
 #ifdef CONFIG_MIPS_AU1000
-	if ((epfix->system == SYS_PB1000) || (epfix->system == SYS_PB1500))
+	if ((epfix->system == SYS_PB1000) || (epfix->system == SYS_PB1500) || (epfix->system == SYS_MPU200))
 		epfix->busclk = get_au1000_lcd_clock();
 #endif
 	
@@ -2412,7 +2408,7 @@ e1356fb_init(void)
 	if (readb(&reg->md_cfg->md_cfg_stat1) & (1<<4))
 		periodBCLK *= 2;
     
-	if ((epfix->system == SYS_PB1000) || (epfix->system == SYS_PB1500))
+	if ((epfix->system == SYS_PB1000) || (epfix->system == SYS_PB1500) || (epfix->system == SYS_MPU200))
 		writeb(0x00, &reg->clk_cfg->cpu2mem_wait_sel);
 	else if (periodMCLK - 4 > periodBCLK)
 		writeb(0x02, &reg->clk_cfg->cpu2mem_wait_sel);
@@ -2541,9 +2537,17 @@ e1356fb_init(void)
 			goto ret_enxio;
 		}
 		writeb(btmp, &reg->panel_cfg->panel_type);
+#ifdef CONFIG_SNSC_MPU200
+		writeb(0x06, &reg->genio->gpio_cfg);  /* set GPIO 1&2 */
+		writeb(0x06, &reg->genio->gpio_ctrl); /* set GPIO 1&2 */
+#endif
 		break;
 	case DISP_TYPE_CRT:
+#ifdef CONFIG_SNSC_MPU200
+		writeb(0x08, &reg->crttv_cfg->tv_output_ctrl);
+#else
 		writeb(0x00, &reg->crttv_cfg->tv_output_ctrl);
+#endif
 		break;
 	case DISP_TYPE_NTSC:
 	case DISP_TYPE_PAL:
@@ -2571,6 +2575,33 @@ e1356fb_init(void)
 		struct fb_videomode* modedb, *dm;
 		int dbsize = e1356fb_get_mode(&fb_info, 640, 480, &modedb, &dm);
 
+#ifdef CONFIG_SNSC_MPU200
+               /* As for MPU-200, we first try our modedb so that
+                * we can tune the display parameters.
+                * And try if failed, then try generic modedb.
+                */
+		if (!fb_find_mode(&var, &fb_info.fb_info,
+				epfix->mode_option,
+				modedb, dbsize, dm, boot_par.bpp)) {
+			printk("e1356fb: mode %s failed e1356 modedb. trying generic modedb.\n",
+				epfix->mode_option);
+			// first try the generic modedb
+			if (!fb_find_mode(&var, &fb_info.fb_info, epfix->mode_option,
+					  NULL, 0, NULL, boot_par.bpp)) {
+				printk("e1356fb: mode %s failed, trying e1356 modedb\n",
+				       epfix->mode_option);
+				// didn't work in generic modedb, try ours
+				if (!fb_find_mode(&var, &fb_info.fb_info,
+						  epfix->mode_option,
+						  modedb, dbsize, dm, boot_par.bpp)) {
+					printk("e1356fb: mode %s failed e1356 modedb too, sorry\n",
+					       epfix->mode_option);
+					
+					goto ret_enxio;
+				}
+			}
+		}
+#else
 		// first try the generic modedb
 		if (!fb_find_mode(&var, &fb_info.fb_info, epfix->mode_option,
 				  NULL, 0, NULL, boot_par.bpp)) {
@@ -2586,6 +2617,7 @@ e1356fb_init(void)
 				goto ret_enxio;
 			}
 		}
+#endif
 
 		var.xres_virtual = boot_par.width_virt ?
 			boot_par.width_virt : boot_par.width;
@@ -2693,7 +2725,29 @@ e1356fb_setup(char *options, int *ints)
 	memset(&boot_fix, 0, sizeof(struct e1356fb_fix));
 	memset(&boot_par, 0, sizeof(struct e1356fb_par));
 	boot_fix.system = -1;
-    
+
+#ifdef CONFIG_SNSC_MPU200
+	/* fix default parameters */
+#ifdef CONFOG_MPU200_T_TFT
+	boot_fix = systems[SYS_MPU200].fix;
+	boot_fix.disp_type = DISP_TYPE_TFT;
+	boot_par = systems[SYS_MPU200].par;
+#endif /* CONFOG_MPU200_T_TFT */
+#ifdef CONFOG_MPU200_N_TFT
+	boot_fix = systems[SYS_MPU200].fix;
+	boot_fix.disp_type = DISP_TYPE_TFT;
+	boot_par = systems[SYS_MPU200].par;
+#endif /* CONFOG_MPU200_N_TFT */
+#ifdef CONFOG_MPU200_CRT
+	boot_fix = systems[SYS_MPU200].fix;
+	boot_fix.disp_type = DISP_TYPE_CRT;
+	boot_par = systems[SYS_MPU200].par;
+#endif /* CONFOG_MPU200_CRT */
+	if (boot_fix.system == -1) { /* no config case */
+		boot_fix = systems[SYS_MPU200].fix;
+		boot_par = systems[SYS_MPU200].par;
+	}
+#endif /* CONFIG_SNSC_MPU200 */    
 	if (!options || !*options)
 		return;
     
@@ -2803,6 +2857,9 @@ e1356fb_setup(char *options, int *ints)
 			} else if (!strncmp(this_opt+7, "clio1050", 7)) {
 				boot_fix = systems[SYS_CLIO1050].fix;
 				boot_par = systems[SYS_CLIO1050].par;
+			} else if (!strncmp(this_opt+7, "mpu200", 6)) {
+				boot_fix = systems[SYS_MPU200].fix;
+				boot_par = systems[SYS_MPU200].par;
 			}
 		} else {
 			boot_fix.mode_option = this_opt;
@@ -3060,99 +3117,3 @@ e1356fb_hwcursor_init(struct fb_info_e1356* info)
 	printk("e1356fb: reserving 1024 bytes for the hwcursor at %p\n",
 	       fb_info.membase_virt + fb_info.fb_size);
 }
-
-#if defined(CONFIG_64BIT_PHYS_ADDR) && defined(CONFIG_CPU_MIPS32)
-
-/*
- * Return indicates whether a page was freed so caller can adjust rss
- */
-static inline void forget_pte(pte_t page)
-{
-	if (!pte_none(page)) {
-		printk("forget_pte: old mapping existed!\n");
-		BUG();
-	}
-}
-
-/*
- * maps a range of physical memory into the requested pages. the old
- * mappings are removed. any references to nonexistent pages results
- * in null mappings (currently treated as "copy-on-access")
- */
-static inline void e1356_remap_pte_range(pte_t * pte, unsigned long address, unsigned long size,
-	phys_t phys_addr, pgprot_t prot)
-{
-	unsigned long end;
-
-	address &= ~PMD_MASK;
-	end = address + size;
-	if (end > PMD_SIZE)
-		end = PMD_SIZE;
-	do {
-		struct page *page;
-		pte_t oldpage;
-		oldpage = ptep_get_and_clear(pte);
-
-		page = virt_to_page(__va(phys_addr));
-		if ((!VALID_PAGE(page)) || PageReserved(page))
- 			set_pte(pte, mk_pte_phys(phys_addr, prot));
-		forget_pte(oldpage);
-		address += PAGE_SIZE;
-		phys_addr += PAGE_SIZE;
-		pte++;
-	} while (address && (address < end));
-}
-
-static inline int e1356_remap_pmd_range(struct mm_struct *mm, pmd_t * pmd, unsigned long address, unsigned long size,
-	phys_t phys_addr, pgprot_t prot)
-{
-	unsigned long end;
-
-	address &= ~PGDIR_MASK;
-	end = address + size;
-	if (end > PGDIR_SIZE)
-		end = PGDIR_SIZE;
-	phys_addr -= address;
-	do {
-		pte_t * pte = pte_alloc(mm, pmd, address);
-		if (!pte)
-			return -ENOMEM;
-		e1356_remap_pte_range(pte, address, end - address, address + phys_addr, prot);
-		address = (address + PMD_SIZE) & PMD_MASK;
-		pmd++;
-	} while (address && (address < end));
-	return 0;
-}
-
-/*  Note: this is only safe if the mm semaphore is held when called. */
-static int e1356_remap_page_range(unsigned long from, phys_t phys_addr, unsigned long size, pgprot_t prot)
-{
-	int error = 0;
-	pgd_t * dir;
-	phys_t beg = from;
-	phys_t end = from + size;
-	struct mm_struct *mm = current->mm;
-
-	phys_addr -= from;
-	dir = pgd_offset(mm, from);
-	flush_cache_range(mm, beg, end);
-	if (from >= end)
-		BUG();
-
-	spin_lock(&mm->page_table_lock);
-	do {
-		pmd_t *pmd = pmd_alloc(mm, dir, from);
-		error = -ENOMEM;
-		if (!pmd)
-			break;
-		error = e1356_remap_pmd_range(mm, pmd, from, end - from, phys_addr + from, prot);
-		if (error)
-			break;
-		from = (from + PGDIR_SIZE) & PGDIR_MASK;
-		dir++;
-	} while (from && (from < end));
-	spin_unlock(&mm->page_table_lock);
-	flush_tlb_range(mm, beg, end);
-	return error;
-}
-#endif

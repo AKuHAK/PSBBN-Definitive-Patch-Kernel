@@ -243,6 +243,8 @@ static struct {
 	{ "D-Link DFE-690TXD (RealTek RTL8139)", RTL8139_CAPS },
 	{ "SEGA Broadband Adapter", RTL8139_CAPS },
 	{ "RealTek RTL8129", RTL8129_CAPS },
+        { "Allied Telesis 8139B PCI/CardBus",RTL8139_CAPS },
+        { "Planex Communications FNW-3603-TX",RTL8139_CAPS },
 };
 
 
@@ -256,6 +258,8 @@ static struct pci_device_id rtl8139_pci_tbl[] __devinitdata = {
 	{0x1186, 0x1300, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DFE538TX },
 	{0x1186, 0x1340, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DFE690TXD },
 	{0x11db, 0x1234, PCI_ANY_ID, PCI_ANY_ID, 0, 0, SEGABBA },
+        {0x1259, 0xa117, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139_CB },
+        {0x14ea, 0xab06, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139_CB },
 
 #ifdef CONFIG_8139TOO_8129
 	{0x10ec, 0x8129, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8129 },

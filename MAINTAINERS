@@ -182,13 +182,6 @@ M:	Juergen Fischer <fischer@norbit.de>
 L:	linux-scsi@vger.kernel.org
 S:	Maintained
 
-ALTERA EPXA1/EPXA10 DEVELOPMENT BOARD PORT
-P:	Clive Davies
-M:	cdavies@altera.com
-L:	linux-arm-kernel@lists.arm.linux.org.uk
-W:      http://www.arm.linux.org.uk/
-S:	Maintained
-
 APM DRIVER
 P:	Stephen Rothwell
 M:	sfr@canb.auug.org.au
@@ -802,6 +795,13 @@ M:      braam@clusterfs.com
 W:      http://www.inter-mezzo.org/
 L:      intermezzo-discuss@lists.sourceforge.net
 S:      Maintained
+
+INTERNATIONAL KERNEL PATCH (CRYPTO)
+P:	Alexander Kjeldaas
+M:	astor@fast.no
+W:	http://www.kerneli.org/
+L:	linux-kernel@vger.rutgers.edu
+S:	Maintained
 
 IP MASQUERADING:
 P:	Juanjo Ciarlante
@@ -1798,6 +1798,14 @@ P:	Henner Eisen
 M:	eis@baty.hanse.de
 L:	linux-x25@vger.kernel.org
 S:	Maintained
+
+XFS FILESYSTEM
+P:	Silicon Graphics Inc
+M:	owner-xfs@oss.sgi.com
+M:	lord@sgi.com
+L:	linux-xfs@oss.sgi.com
+W:	http://oss.sgi.com/projects/xfs
+S:	Supported
 
 X86 3-LEVEL PAGING (PAE) SUPPORT
 P:	Ingo Molnar

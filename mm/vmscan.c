@@ -418,7 +418,7 @@ static int shrink_cache(int nr_pages, zone_t * classzone, unsigned int gfp_mask,
 			continue;
 		}
 
-		if (PageDirty(page) && is_page_cache_freeable(page) && page->mapping) {
+		if ((PageDirty(page) || DelallocPage(page)) && is_page_cache_freeable(page) && page->mapping) {
 			/*
 			 * It is not critical here to write it only if
 			 * the page is unmapped beause any direct writer

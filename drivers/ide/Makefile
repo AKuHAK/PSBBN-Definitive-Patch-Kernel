@@ -68,9 +68,8 @@ ide-obj-$(CONFIG_BLK_DEV_UMC8672)	+= umc8672.o
 ide-obj-$(CONFIG_BLK_DEV_VIA82CXXX)	+= via82cxxx.o
 ide-obj-$(CONFIG_BLK_DEV_MPC8xx_IDE)	+= ide-m8xx.o
 ide-obj-$(CONFIG_BLK_DEV_REDWOOD_IDE)	+= stb03xxx.o
-ide-obj-$(CONFIG_IBM_OCP_IDE)		+= ibm_ocp_ide.o
-ide-obj-$(CONFIG_BLK_DEV_REDWOOD6_IDE)	+= ocp_stbxxxxx.o
-ide-obj-$(CONFIG_BLK_DEV_TC86C001)	+= tc86c001.o
+ide-obj-$(CONFIG_BLK_DEV_PS2_IDE)	+= ps2ide.o
+ide-obj-$(CONFIG_BLK_DEV_PS2_IDEDMA)	+= ps2dma.o
 
 # The virtualised raid layers MUST come after the ide itself or bad stuff
 # will happen.

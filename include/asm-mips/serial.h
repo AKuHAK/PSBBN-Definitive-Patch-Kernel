@@ -145,6 +145,27 @@
 #define IVR_SERIAL_PORT_DEFNS
 #endif
 
+#ifdef CONFIG_MIPS_SNSC_MPU210
+#include <asm/it8172/it8172.h>
+#include <asm/it8172/it8172_int.h>
+#include <asm/it8712.h>
+#define SNSC_MPU210_SERIAL_PORT_DEFNS                                  \
+    { baud_base: BASE_BAUD, port: (IT8172_PCI_IO_BASE + IT_UART_BASE), \
+      irq: IT8172_UART_IRQ, flags: STD_COM_FLAGS, type: 0x3 }, \
+    { baud_base: (24000000/(16*13)), port: (IT8172_PCI_IO_BASE + IT8712_UART1_PORT), \
+      irq: IT8172_SERIRQ_4, flags: STD_COM_FLAGS, type: 0x3 }, \
+    { baud_base: (24000000/(16*13)), port: (IT8172_PCI_IO_BASE + IT8712_UART2_PORT), \
+      irq: IT8172_SERIRQ_3, flags: STD_COM_FLAGS, type: 0x3 }, \
+    /* Smart Card Reader 0 */ \
+    { baud_base: BASE_BAUD, port: (IT8172_PCI_IO_BASE + IT_SCR0_BASE), \
+      irq: IT8172_SCR0_IRQ, flags: STD_COM_FLAGS, type: 0x3 }, \
+    /* Smart Card Reader 1 */ \
+    { baud_base: BASE_BAUD, port: (IT8172_PCI_IO_BASE + IT_SCR1_BASE), \
+      irq: IT8172_SCR1_IRQ, flags: STD_COM_FLAGS, type: 0x3 },
+#else
+#define SNSC_MPU210_SERIAL_PORT_DEFNS
+#endif
+
 #ifdef CONFIG_AU1000_UART
 #include <asm/au1000.h>
 #define AU1000_SERIAL_PORT_DEFNS                              \
@@ -165,12 +186,12 @@
 #define RC32300_SERIAL_PORT_DEFNS                 \
     { baud_base: RC32300_BASE_BAUD,               \
       iomem_base: KSEG1ADDR(RC32300_UART0_BASE),  \
-      irq: RC32300_UART0_IRQ,                     \
+      irq: GROUP5_IRQ_BASE,                       \
       iomem_reg_shift: 2, io_type: SERIAL_IO_MEM, \
       flags: STD_COM_FLAGS, type: 3 },            \
     { baud_base: RC32300_BASE_BAUD,               \
       iomem_base: KSEG1ADDR(RC32300_UART1_BASE),  \
-      irq: RC32300_UART1_IRQ,                     \
+      irq: GROUP6_IRQ_BASE,                       \
       iomem_reg_shift: 2, io_type: SERIAL_IO_MEM, \
       flags: STD_COM_FLAGS, type: 3 },
 #else
@@ -306,13 +327,12 @@
 #endif
 
 #ifdef CONFIG_DDB5477
-#include <asm/ddb5xxx/ddb5477.h>
-#define DDB5477_SERIAL_PORT_DEFNS                                             \
-        { baud_base: BASE_BAUD, irq: VRC5477_IRQ_UART0, flags: STD_COM_FLAGS, \
-          iomem_base: (u8*)0xbfa04200, iomem_reg_shift: 3,                    \
+#define DDB5477_SERIAL_PORT_DEFNS                                       \
+        { baud_base: BASE_BAUD, irq: 12, flags: STD_COM_FLAGS,          \
+          iomem_base: (u8*)0xbfa04200, iomem_reg_shift: 3,              \
           io_type: SERIAL_IO_MEM},\
-        { baud_base: BASE_BAUD, irq: VRC5477_IRQ_UART1, flags: STD_COM_FLAGS, \
-          iomem_base: (u8*)0xbfa04240, iomem_reg_shift: 3,                    \
+        { baud_base: BASE_BAUD, irq: 28, flags: STD_COM_FLAGS,          \
+          iomem_base: (u8*)0xbfa04240, iomem_reg_shift: 3,              \
           io_type: SERIAL_IO_MEM},
 #else
 #define DDB5477_SERIAL_PORT_DEFNS
@@ -321,6 +341,7 @@
 #define SERIAL_PORT_DFNS		\
 	IVR_SERIAL_PORT_DEFNS           \
 	ITE_SERIAL_PORT_DEFNS           \
+	SNSC_MPU210_SERIAL_PORT_DEFNS   \
 	RC32300_SERIAL_PORT_DEFNS       \
 	ATLAS_SERIAL_PORT_DEFNS		\
 	COBALT_SERIAL_PORT_DEFNS	\

@@ -250,6 +250,9 @@ static struct devprobe isa_probes[] __initdata = {
 #ifdef CONFIG_SMC9194
 	{smc_init, 0},
 #endif
+#ifdef CONFIG_SMC91111
+	{smc_init, 0},
+#endif
 #ifdef CONFIG_SEEQ8005 
 	{seeq8005_probe, 0},
 #endif

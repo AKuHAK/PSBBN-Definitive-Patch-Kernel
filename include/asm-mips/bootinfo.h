@@ -36,10 +36,12 @@
 #define MACH_GROUP_EE          21 /* Emotion Engine (Sony PlayStation 2)      */
 #define MACH_GROUP_LEXRA       22 /* Lexra Development Board */
 #define MACH_GROUP_IDT         23 /* IDT Eval Boards                          */
+#define MACH_GROUP_SNSC        24 /* Sony NSC boards                          */
 #define GROUP_NAMES { "unknown", "Jazz", "Digital", "ARC", "SNI", "ACN",      \
 	"SGI", "Cobalt", "NEC DDB", "Baget", "Cosine", "Galileo", "Momentum", \
 	"ITE", "Philips", "Globepspan", "SiByte", "Toshiba", "Alchemy",       \
-	"NEC Vr41xx", "HP LaserJet", "Emotion Engine", "Lexra", "IDT" }
+	"NEC Vr41xx", "HP LaserJet", "Emotion Engine", "Lexra", "IDT",        \
+	"Sony NSC" }
 
 /*
  * Valid machtype values for group unknown (low order halfword of mips_machtype)
@@ -121,9 +123,8 @@
 #define MACH_NEC_DDB5476         1      /* NEC DDB Vrc-5476 */
 #define MACH_NEC_DDB5477         2      /* NEC DDB Vrc-5477 */
 #define MACH_NEC_ROCKHOPPER      3      /* rockhopper base board */
-#define MACH_NEC_ROCKHOPPERII    4      /* rockhopper II base board */
 
-#define GROUP_NEC_DDB_NAMES { "Vrc-5074", "Vrc-5476", "Vrc-5477", "Rockhopper","RockhopperII" }
+#define GROUP_NEC_DDB_NAMES { "Vrc-5074", "Vrc-5476", "Vrc-5477", "Rockhopper" }
 
 /*
  * Valid machtype for group BAGET
@@ -192,17 +193,13 @@
 #define MACH_TOPAS		1
 #define MACH_JMR		2
 #define MACH_TOSHIBA_JMR3927    3      /* JMR-TX3927 CPU/IO board */
-#define MACH_TOSHIBA_RBTX4925	4      /* RBTX4925 */
-#define MACH_TOSHIBA_RBTX4927	5      /* RBTX4927 */
 
-#define GROUP_TOSHIBA_NAMES { "Pallas", "TopasCE", "JMR", "JMR TX3927", "RBTX4925", "RBTX4927" }
+#define GROUP_TOSHIBA_NAMES { "Pallas", "TopasCE", "JMR", "JMR TX3927" }
 
 /*
  * Valid machtype for group Alchemy
  */
 #define MACH_PB1000	0	         /* Au1000-based eval board */
-#define MACH_PB1100	1	         /* Au1100-based eval board */
-#define MACH_PB1500	2	         /* Au1500-based eval board */
  
 #define GROUP_ALCHEMY_NAMES { "Pb1000" } /* the actual board name */
 
@@ -214,10 +211,9 @@
 #define MACH_NEC_KORVA                 2       /* NEC korva board */
 #define MACH_VADEM_CLIO_1000           3       /* Vadem Clio 1000 */
 #define MACH_NEC_MOBILEPRO_780         4       /* NEC MobilePro 780 PDA */
-#define MACH_NEC_DDB4131	       5       /* CMB-Vr4131 on rockhopper 2.1*/
 
 #define GROUP_NEC_VR41XX_NAMES { "Osprey", "Eagle", "Korva", "Clio 1000", \
-                "MobilePro 780", "DDB-Vr4131" }
+                "MobilePro 780" }
 
 /*
  * Valid machtype for group EE
@@ -241,6 +237,14 @@
 #define MACH_LXPB20K 		 0	/* LXPB20K */
 
 #define GROUP_LEXRA_NAMES { "LXPB20K" }
+
+/*
+ * Valid machtype for group Sony NSC
+ */
+#define MACH_SNSC_MPU200	0	/* Sony NSC MPU-200 */
+#define MACH_SNSC_MPU210	1	/* Sony NSC MPU-210 */
+
+#define GROUP_SNSC_NAMES { "MPU-200", "MPU-210" }
 
 /*
  * Valid cputype values
@@ -292,9 +296,7 @@
 #define CPU_R5900		44
 #define CPU_AU1500		45	
 #define CPU_RC32300             46
-#define CPU_TX4925		47
-#define CPU_TX4927		48
-#define CPU_LAST		48
+#define CPU_LAST		46
 
 #define CPU_NAMES { "unknown", "R2000", "R3000", "R3000A", "R3041", "R3051", \
         "R3052", "R3081", "R3081E", "R4000PC", "R4000SC", "R4000MC",         \
@@ -303,9 +305,9 @@
         "R5000A", "R4640", "Nevada", "RM7000", "R5432", "MIPS 4Kc",          \
         "MIPS 5Kc", "R4310", "SiByte SB1", "TX3912", "TX3922", "TX3927",     \
 	"Au1000", "MIPS 4KEc", "MIPS 4KSc", "NEC Vr41xx", "R5500", "TX49xx", \
-	"TX39xx", "R5900", "Au1500", "RC32300", "TX4925", "TX4927" }
+	"TX39xx", "R5900", "Au1500", "RC32300" }
 
-#define COMMAND_LINE_SIZE       256
+#define COMMAND_LINE_SIZE	256
 
 #define BOOT_MEM_MAP_MAX	32
 #define BOOT_MEM_RAM		1

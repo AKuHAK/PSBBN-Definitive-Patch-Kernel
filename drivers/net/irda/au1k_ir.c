@@ -46,7 +46,11 @@
 #include <asm/bitops.h>
 #include <asm/io.h>
 #include <asm/au1000.h>
+#ifdef CONFIG_SNSC_MPU200
+#include <asm/snsc_mpu200.h>
+#else /* CONFIG_SNSC_MPU200 */
 #include <asm/pb1000.h>
+#endif /* CONFIG_SNSC_MPU200 */
 
 #include <net/irda/irda.h>
 #include <net/irda/irmod.h>
@@ -173,10 +177,21 @@ static int au1k_irda_init(void)
 	static unsigned version_printed = 0;
 	struct net_device *dev;
 	int err;
+#ifdef MODULE
+	u32 pin_func;
+#endif /* MODULE */
 
 	if (version_printed++ == 0) printk(version);
 
 	rtnl_lock();
+#ifdef MODULE
+	// setup irda clocks
+	// aux clock, divide by 2, clock from 2/4 divide
+	writel(readl(SYS_CLKSRC) | 0x7, SYS_CLKSRC);
+	pin_func = inl(SYS_PINFUNC) & (u32)(~(1<<2)); // clear IRTXD
+	outl(pin_func, SYS_PINFUNC);
+#endif /* MODULE */
+
 	dev = dev_alloc("irda%d", &err);
 	if (dev) {
 		dev->irq = AU1000_IRDA_RX_INT; /* TX has its own interrupt */
@@ -745,10 +760,12 @@ au1k_irda_set_speed(struct net_device *dev, int speed)
 		ptxd->flags = AU_OWN;
 	}
 
+#ifndef CONFIG_SNSC_MPU200
 	if (speed == 4000000)
 		writel(1<<13, CPLD_AUX1);
 	else
 		writel(readl(CPLD_AUX1) & ~(1<<13), CPLD_AUX1);
+#endif /* CONFIG_SNSC_MPU200 */
 
 	switch (speed) {
 	case 9600:	
@@ -771,10 +788,12 @@ au1k_irda_set_speed(struct net_device *dev, int speed)
 		writel(12<<5, IR_WRITE_PHY_CONFIG); 
 		writel(IR_SIR_MODE, IR_CONFIG_1); 
 		break;
+#ifndef CONFIG_SNSC_MPU200
 	case 4000000:
 		writel(0xF, IR_WRITE_PHY_CONFIG);
 		writel(IR_FIR|IR_DMA_ENABLE|IR_RX_ENABLE, IR_CONFIG_1); 
 		break;
+#endif /* CONFIG_SNSC_MPU200 */
 	default:
 		printk(KERN_ERR "%s unsupported speed %x\n", dev->name, speed);
 		ret = -EINVAL;

@@ -59,10 +59,12 @@ else
   endif
 endif
 obj-$(CONFIG_PCMCIA_M8XX)			+= m8xx_pcmcia.o
-
-obj-$(CONFIG_PCMCIA_AU1000)			+= au1x00_ss.o
+obj-$(CONFIG_PCMCIA_AU1000)			+= au1000_ss.o
+obj-$(CONFIG_PCMCIA_AU1500)			+= au1500_ss.o
 au1000_ss-objs-y				:= au1000_generic.o
-au1000_ss-objs-$(CONFIG_PCMCIA_PB1X00)		+= au1000_pb1x00.o
+au1000_ss-objs-$(CONFIG_MIPS_PB1000)		+= au1000_pb1000.o
+au1000_ss-objs-$(CONFIG_MIPS_PB1500)		+= au1000_pb1500.o
+au1000_ss-objs-$(CONFIG_SNSC_MPU200)		+= au1000_snsc_mpu200.o
 
 obj-$(CONFIG_PCMCIA_CLPS6700)	+= clps6700.o
 obj-$(CONFIG_PCMCIA_SA1100)	+= sa1100_cs.o
@@ -99,7 +101,10 @@ pcmcia_core.o:  $(pcmcia_core-objs)
 sa1100_cs.o: $(sa1100_cs-objs-y)
 	$(LD) -r -o $@ $(sa1100_cs-objs-y)
 
-au1x00_ss.o: $(au1000_ss-objs-y)
+au1000_ss.o: $(au1000_ss-objs-y)
+	$(LD) -r -o $@ $(au1000_ss-objs-y)
+
+au1500_ss.o: $(au1000_ss-objs-y)
 	$(LD) -r -o $@ $(au1000_ss-objs-y)
 
 yenta_socket.o: $(yenta_socket-objs)

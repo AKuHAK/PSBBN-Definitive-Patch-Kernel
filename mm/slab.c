@@ -1569,6 +1569,23 @@ void kmem_cache_free (kmem_cache_t *cachep, void *objp)
 	local_irq_restore(flags);
 }
 
+void *
+kmem_cache_zalloc(kmem_cache_t *cachep, int flags)
+{
+	void    *ptr;
+	ptr = __kmem_cache_alloc(cachep, flags);
+	if (ptr)
+#if DEBUG
+		memset(ptr, 0, cachep->objsize -
+			(cachep->flags & SLAB_RED_ZONE ? 2*BYTES_PER_WORD : 0));
+#else
+		memset(ptr, 0, cachep->objsize);
+#endif
+
+	return ptr;
+}
+
+
 /**
  * kfree - free previously allocated memory
  * @objp: pointer returned by kmalloc.

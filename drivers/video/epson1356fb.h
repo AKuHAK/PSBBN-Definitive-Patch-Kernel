@@ -321,8 +321,8 @@ enum tv_format_t {
 
 struct e1356fb_fix {
 	int system;       // the number of a pre-packaged system
-	u64 regbase_phys; // phys start address of registers
-	u64 membase_phys; // phys start address of fb memory
+	u32 regbase_phys; // phys start address of registers
+	u32 membase_phys; // phys start address of fb memory
 
 	// Memory parameters
 	int mem_speed;    // speed: 50, 60, 70, or 80 (nsec)
@@ -456,6 +456,7 @@ enum {
 	SYS_PB1500,
 	SYS_SDU1356,
 	SYS_CLIO1050,
+	SYS_MPU200,
 	NUM_SYSTEMS // must be last
 };
 
@@ -493,7 +494,7 @@ static struct {
 			 * 36-bit physical addresses in linux-mips32 mm, since
 			 * the mips32 specification specifically supports this.
 			 */
-			0xE00000000, 0xE00200000,
+			0xE0000000, 0xE0200000,
 			60, MEM_TYPE_EDO_2CAS, 64, MEM_SMR_CBR,
 			0, 0,   // BUSCLK and MCLK are calculated at run-time
 			40000, 14318, // CLKI, CLKI2
@@ -550,7 +551,7 @@ static struct {
 			 * 36-bit physical addresses in linux-mips32 mm, since
 			 * the mips32 specification specifically supports this.
 			 */
-			0xE1B000000, 0xE1B200000,
+			0xE0000000, 0xE0200000,
 			50, MEM_TYPE_EMBEDDED_SDRAM, 64, MEM_SMR_CBR,
 			0, 0,   // BUSCLK and MCLK are calculated at run-time
 			40000, 14318, // CLKI, CLKI2
@@ -641,6 +642,61 @@ static struct {
 			// timings will be set by modedb
 			{0}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 			16
+		}
+	},
+	/*
+	 * SONY NSC MPU-200
+	 */
+	{
+		{   // fix
+			SYS_MPU200,
+			/*
+			 * Note!: these are "pseudo" physical addresses;
+			 * the SED1356 is not actually mapped here, but rather
+			 * at the 36-bit address of 0xE 0000 0000. There is an
+			 * ugly hack in the Au1000 TLB refill handler that will
+			 * translate pte_t's in the range 0xE000 0000 -->
+			 * 0xEFFF FFFF to the 36-bit range 0xE 0000 0000 -->
+			 * 0xE 0FFF FFFF. The long-term solution is to support
+			 * 36-bit physical addresses in linux-mips32 mm, since
+			 * the mips32 specification specifically supports this.
+			 */
+			0xE0000000, 0xE0200000,
+			50, MEM_TYPE_EDO_2CAS, 64, MEM_SMR_CBR,
+			0, 0,   // BUSCLK and MCLK are calculated at run-time
+			40000, 24576, // CLKI, CLKI2
+#ifdef CONFIG_MPU200_CRT
+			DISP_TYPE_CRT,
+			0, 0, // TV Options
+			0, 0, // Panel options
+#elif defined (CONFIG_MPU200_T_TFT)
+			DISP_TYPE_TFT,
+			0, 0, // TV Options
+			0, 18, // Panel options, EL panel?, data width?
+#elif defined (CONFIG_MPU200_N_TFT)
+			DISP_TYPE_TFT,
+			0, 0, // TV Options
+			0, 18, // Panel options, EL panel?, data width?
+#else
+			DISP_TYPE_PAL,
+			TV_FILT_FLICKER|TV_FILT_LUM|TV_FILT_CHROM,
+			TV_FMT_COMPOSITE,
+			0, 0, // Panel options
+#endif
+			0, 0,
+#ifdef CONFIG_MTRR
+			0,
+#endif
+			0,
+			0,
+			{0},
+			"640x480@60"
+		},
+		{   // par
+			0, 0, 640, 480, 16, 2,
+			// timings will be set by modedb
+			{0}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			256
 		}
 	}
 };

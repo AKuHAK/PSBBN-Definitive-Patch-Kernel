@@ -45,6 +45,11 @@
 #include <linux/ioport.h>
 #include <linux/init.h>
 #include <linux/i2c.h>
+#if defined(CONFIG_SNSC_MPU300_INTRI2C) || defined(CONFIG_SNSC_MPU300_KPAD)
+#include <linux/delay.h>
+#include <linux/spinlock.h>
+#include <linux/smp_lock.h>
+#endif
 #define LM_DATE "20011118"
 #define LM_VERSION "2.6.2"
 
@@ -89,7 +94,11 @@ static int supported[] = {PCI_DEVICE_ID_INTEL_82801AA_3,
 #define SMBHSTCFG_I2C_EN      4
 
 /* Other settings */
+#if defined(CONFIG_SNSC_MPU300_INTRI2C) || defined(CONFIG_SNSC_MPU300_KPAD)
+#define MAX_TIMEOUT 5000
+#else
 #define MAX_TIMEOUT 500
+#endif
 #define  ENABLE_INT9 0
 
 /* I801 command constants */
@@ -168,6 +177,9 @@ static int __initdata i801_initialized;
 static unsigned short i801_smba = 0;
 static struct pci_dev *I801_dev = NULL;
 
+#ifdef CONFIG_SNSC_MPU300_INTRI2C
+static spinlock_t access_lock;      /* spinlock for SMBus access */
+#endif
 
 /* Detect whether a I801 can be found, and initialize it, where necessary.
    Note the differences between kernels with the old PCI BIOS interface and
@@ -280,8 +292,12 @@ int i801_setup(void)
 /* Internally used pause function */
 void i801_do_pause(unsigned int amount)
 {
+#if defined(CONFIG_SNSC_MPU300_INTRI2C) || defined(CONFIG_SNSC_MPU300_KPAD)
+        udelay(1000*amount);
+#else
 	current->state = TASK_INTERRUPTIBLE;
 	schedule_timeout(amount);
+#endif
 }
 
 /* Another internally used function */
@@ -550,10 +566,18 @@ s32 i801_access(struct i2c_adapter * adap, u16 addr, unsigned short flags,
 		char read_write, u8 command, int size,
 		union i2c_smbus_data * data)
 {
+#ifdef CONFIG_SNSC_MPU300_INTRI2C
+        int      rval;
+        unsigned long irqflags;
 
+        spin_lock_irqsave(&access_lock, irqflags);
+#endif
 	switch (size) {
 	case I2C_SMBUS_PROC_CALL:
 		printk("i2c-i801.o: I2C_SMBUS_PROC_CALL not supported!\n");
+#ifdef CONFIG_SNSC_MPU300_INTRI2C
+                spin_unlock_irqrestore(&access_lock, irqflags);
+#endif
 		return -1;
 	case I2C_SMBUS_QUICK:
 		outb_p(((addr & 0x7f) << 1) | (read_write & 0x01),
@@ -593,18 +617,39 @@ s32 i801_access(struct i2c_adapter * adap, u16 addr, unsigned short flags,
 		/* Block transactions are very different from piix4 block
 		   and from the other i801 transactions. Handle in the
 		   i801_block_transaction() routine. */
+#ifdef CONFIG_SNSC_MPU300_INTRI2C
+                rval = i801_block_transaction(data, read_write, 
+                                              size==I2C_SMBUS_I2C_BLOCK_DATA);
+                spin_unlock_irqrestore(&access_lock, irqflags);
+		return rval;
+#else
 		return i801_block_transaction(data, read_write, 
                                               size==I2C_SMBUS_I2C_BLOCK_DATA);
+#endif
 	}
 
 	/* 'size' is really the transaction type */
 	outb_p((size & 0x3C) + (ENABLE_INT9 & 1), SMBHSTCNT);
 
 	if (i801_transaction())	/* Error in transaction */
+#ifdef CONFIG_SNSC_MPU300_INTRI2C
+                {
+                        spin_unlock_irqrestore(&access_lock, irqflags);
+                        return -1;
+                }
+#else
 		return -1;
+#endif
 
 	if ((read_write == I2C_SMBUS_WRITE) || (size == I801_QUICK))
+#ifdef CONFIG_SNSC_MPU300_INTRI2C
+                {
+                        spin_unlock_irqrestore(&access_lock, irqflags);
+                        return 0;
+                }
+#else
 		return 0;
+#endif
 
 
 	switch (size) {
@@ -618,6 +663,9 @@ s32 i801_access(struct i2c_adapter * adap, u16 addr, unsigned short flags,
 		data->word = inb_p(SMBHSTDAT0) + (inb_p(SMBHSTDAT1) << 8);
 		break;
 	}
+#ifdef CONFIG_SNSC_MPU300_INTRI2C
+        spin_unlock_irqrestore(&access_lock, irqflags);
+#endif
 	return 0;
 }
 
@@ -666,6 +714,9 @@ int __init i2c_i801_init(void)
 		i801_cleanup();
 		return res;
 	}
+#ifdef CONFIG_SNSC_MPU300_INTRI2C
+        spin_lock_init(&access_lock);
+#endif
 	i801_initialized++;
 	printk("i2c-i801.o: I801 bus detected and initialized\n");
 	return 0;

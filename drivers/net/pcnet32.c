@@ -1,3 +1,5 @@
+/* $USAGI: pcnet32.c,v 1.16 2002/02/27 12:12:53 yoshfuji Exp $ */
+
 /* pcnet32.c: An AMD PCnet32 ethernet driver for linux. */
 /*
  *	Copyright 1996-1999 Thomas Bogendoerfer
@@ -567,7 +569,7 @@ pcnet32_probe1(unsigned long ioaddr, unsigned char irq_line, int shared, int car
 	break;
     case 0x2625:
 	chipname = "PCnet/FAST III 79C973"; /* PCI */
-	fdx = 1; mii = 1; fset = 1;
+	fdx = 1; mii = 1;
 	break;
     case 0x2626:
 	chipname = "PCnet/Home 79C978"; /* PCI */
@@ -610,7 +612,7 @@ pcnet32_probe1(unsigned long ioaddr, unsigned char irq_line, int shared, int car
     if(fset)
     {
 	a->write_bcr(ioaddr, 18, (a->read_bcr(ioaddr, 18) | 0x0800));
-	a->write_csr(ioaddr, 80, (a->read_csr(ioaddr, 80) & ~0x0C00) | 0x0c00);
+	a->write_csr(ioaddr, 80, (a->read_csr(ioaddr, 80) & 0x0C00) | 0x0c00);
 #ifdef DO_DXSUFLO
 	dxsuflo = 1;
 #endif
@@ -1315,6 +1317,9 @@ pcnet32_rx(struct net_device *dev)
 		lp->stats.rx_errors++;
 	    } else {
 		int rx_in_place = 0;
+#ifdef CONFIG_PCNET32_VMWARE
+		int rx_revbytes = 0;
+#endif
 
 		if (pkt_len > rx_copybreak) {
 		    struct sk_buff *newskb;
@@ -1357,9 +1362,22 @@ pcnet32_rx(struct net_device *dev)
 				     pkt_len,0);
 		}
 		lp->stats.rx_bytes += skb->len;
+#ifdef CONFIG_PCNET32_VMWARE
+		rx_revbytes = skb->len;
+#endif
 		skb->protocol=eth_type_trans(skb,dev);
+#ifdef CONFIG_PCNET32_VMWARE
+		if (skb->protocol == 0) {
+			dev_kfree_skb(skb);
+			lp->stats.rx_bytes -= rx_revbytes;
+		} else {
+			netif_rx(skb);
+			lp->stats.rx_packets++;
+		}
+#else
 		netif_rx(skb);
 		lp->stats.rx_packets++;
+#endif
 	    }
 	}
 	/*
