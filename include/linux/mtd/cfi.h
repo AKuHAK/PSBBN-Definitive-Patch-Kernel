@@ -1,7 +1,7 @@
 
 /* Common Flash Interface structures 
  * See http://support.intel.com/design/flash/technote/index.htm
- * $Id: cfi.h,v 1.26 2001/11/27 14:55:12 cdavies Exp $
+ * $Id: cfi.h,v 1.32 2002/09/05 05:15:32 acurtis Exp $
  */
 
 #ifndef __MTD_CFI_H__
@@ -18,12 +18,15 @@
  * You can optimize the code size and performance by defining only 
  * the geometry(ies) available on your hardware.
  * CFIDEV_INTERLEAVE_n, where  represents the interleave (number of chips to fill the bus width)
- * CFIDEV_BUSWIDTH_n, where n is the bus width in bytes (1, 2, 4, or 8 bytes)
+ * CFIDEV_BUSWIDTH_n, where n is the bus width in bytes (1, 2, 4 or 8 bytes)
  *
  * By default, all (known) geometries are supported.
  */
 
 #ifndef CONFIG_MTD_CFI_GEOMETRY
+
+/* The default case - support all but 64-bit, which has
+   a performance penalty */
 
 #define CFIDEV_INTERLEAVE_1 (1)
 #define CFIDEV_INTERLEAVE_2 (2)
@@ -36,6 +39,8 @@
 typedef __u32 cfi_word;
 
 #else
+
+/* Explicitly configured buswidth/interleave support */
 
 #ifdef CONFIG_MTD_CFI_I1
 #define CFIDEV_INTERLEAVE_1 (1)
@@ -63,10 +68,21 @@ typedef __u32 cfi_word;
 #define CFIDEV_BUSWIDTH_8 (8)
 #endif
 
+/* pick the largest necessary */
 #ifdef CONFIG_MTD_CFI_B8
 typedef __u64 cfi_word;
+
+/* This only works if asm/io.h is included first */
+#ifndef __raw_readll
+#define __raw_readll(addr)	(*(volatile __u64 *)(addr))
+#endif
+#ifndef __raw_writell
+#define __raw_writell(v, addr)	(*(volatile __u64 *)(addr) = (v))
+#endif
 #define CFI_WORD_64
-#else
+#else  /* CONFIG_MTD_CFI_B8 */
+/* All others can use 32-bits. It's probably more efficient than
+   the smaller types anyway */
 typedef __u32 cfi_word;
 #endif /* CONFIG_MTD_CFI_B8 */
 
@@ -76,12 +92,15 @@ typedef __u32 cfi_word;
  * The following macros are used to select the code to execute:
  *   cfi_buswidth_is_*()
  *   cfi_interleave_is_*()
- *   [where * is either 1, 2 or 4]
+ *   [where * is either 1, 2, 4, or 8]
  * Those macros should be used with 'if' statements.  If only one of few
  * geometry arrangements are selected, they expand to constants thus allowing
  * the compiler (most of them being 0) to optimize away all the unneeded code,
  * while still validating the syntax (which is not possible with embedded 
  * #if ... #endif constructs).
+ * The exception to this is the 64-bit versions, which need an extension
+ * to the cfi_word type, and cause compiler warnings about shifts being
+ * out of range.
  */
 
 #ifdef CFIDEV_INTERLEAVE_1
@@ -273,8 +292,8 @@ struct cfi_bri_query {
 #define P_ID_RESERVED 65535
 
 
-#define CFI_MODE_CFI	0
-#define CFI_MODE_JEDEC	1
+#define CFI_MODE_CFI	1
+#define CFI_MODE_JEDEC	0
 
 struct cfi_private {
 	__u16 cmdset;
@@ -345,10 +364,11 @@ static inline cfi_word cfi_build_cmd(u_char cmd, struct map_info *map, struct cf
 			val = cmd;
 			val = cpu_to_cfi64((val << 32) | val);
 		} else if (cfi_interleave_is_4()) {
-			/* 4 x16 devices in x16 mode */
+			/* 4 (x16, x32 or x64) devices in x16 mode */
 			val = (cmd << 16) | cmd;
 			val = cpu_to_cfi64((val << 32) | val);
 		} else if (cfi_interleave_is_8()) {
+			/* 8 (x8, x16 or x32) devices in x8 mode */
 			val = (cmd << 8) | cmd;
 			val = (val << 16) | val;
 			val = (val << 32) | val;
@@ -405,7 +425,7 @@ static inline void cfi_write(struct map_info *map, cfi_word val, __u32 addr)
  */
 static inline __u32 cfi_send_gen_cmd(u_char cmd, __u32 cmd_addr, __u32 base,
 				struct map_info *map, struct cfi_private *cfi,
-				int type, __u32 *prev_val)
+				int type, cfi_word *prev_val)
 {
 	cfi_word val;
 	__u32 addr = base + cfi_build_cmd_addr(cmd_addr, CFIDEV_INTERLEAVE, type);
@@ -438,17 +458,23 @@ static inline __u8 cfi_read_query(struct map_info *map, __u32 addr)
 static inline void cfi_udelay(int us)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,2,0)
-	if (current->need_resched) {
-		unsigned long t = us * HZ / 1000000;
-		if (t < 1)
-			t = 1;
+	unsigned long t = us * HZ / 1000000;
+	if (t) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(t);
+		return;
 	}
-	else
 #endif
-		udelay(us);
+	udelay(us);
+	cond_resched();
 }
+
+#ifdef CONFIG_MPU110_LED_API
+#define cfi_spin_lock(mutex)          spin_lock_bh(mutex);  \
+                                      leds_save(flags);
+#define cfi_spin_unlock(mutex)        leds_restore(flags);  \
+                                      spin_unlock_bh(mutex);
+#else
 static inline void cfi_spin_lock(spinlock_t *mutex)
 {
 	spin_lock_bh(mutex);
@@ -458,6 +484,7 @@ static inline void cfi_spin_unlock(spinlock_t *mutex)
 {
 	spin_unlock_bh(mutex);
 }
+#endif
 
 
 #endif /* __MTD_CFI_H__ */

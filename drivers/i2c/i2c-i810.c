@@ -32,7 +32,9 @@
    i810AB		7123           
    i815			1132           
 */
-
+/*
+ *  2002/06/19 Modified for MPU-300 by Sony Corporation.
+ */
 
 #include <linux/version.h>
 #include <linux/module.h>
@@ -126,14 +128,36 @@ static inline unsigned int readlong(int off)
 
 static void bit_i810i2c_setscl(void *data, int val)
 {
+#ifdef CONFIG_SNSC
+        /* 
+           The i815 GPIO pins are not open drain, so the pins must not be set
+           to high level by setting Data Value bit. Instead, the pins should be
+           configured as input (i.e. the outputs become high impedance) to set 
+           the pins high.
+         */
+        if (val) {
+                outlong(SCL_DIR_MASK, I810_GPIOB);
+        } else {
+                outlong(SCL_DIR | SCL_DIR_MASK | SCL_VAL_MASK, I810_GPIOB);
+        }
+#else
 	outlong((val ? SCL_VAL_OUT : 0) | SCL_DIR | SCL_DIR_MASK | SCL_VAL_MASK,
 	     I810_GPIOB);
+#endif
 }
 
 static void bit_i810i2c_setsda(void *data, int val)
 {
+#ifdef CONFIG_SNSC
+        if (val) {
+                outlong(SDA_DIR_MASK, I810_GPIOB);
+        } else {
+                outlong(SDA_DIR | SDA_DIR_MASK | SDA_VAL_MASK, I810_GPIOB);
+        }
+#else
  	outlong((val ? SDA_VAL_OUT : 0) | SDA_DIR | SDA_DIR_MASK | SDA_VAL_MASK,
 	     I810_GPIOB);
+#endif
 }
 
 /* The GPIO pins are open drain, so the pins always remain outputs.
@@ -146,37 +170,69 @@ static void bit_i810i2c_setsda(void *data, int val)
 
 static int bit_i810i2c_getscl(void *data)
 {
+#ifdef CONFIG_SNSC
+	outlong(SCL_DIR_MASK, I810_GPIOB);
+#else
 	outlong(0, I810_GPIOB);
+#endif
 	return (0 != (readlong(I810_GPIOB) & SCL_VAL_IN));
 }
 
 static int bit_i810i2c_getsda(void *data)
 {
+#ifdef CONFIG_SNSC
+	outlong(SDA_DIR_MASK, I810_GPIOB);
+#else
 	outlong(0, I810_GPIOB);
+#endif
 	return (0 != (readlong(I810_GPIOB) & SDA_VAL_IN));
 }
 
 static void bit_i810ddc_setscl(void *data, int val)
 {
+#ifdef CONFIG_SNSC
+        if (val) {
+                outlong(SCL_DIR_MASK, I810_GPIOA);
+        } else {
+                outlong(SCL_DIR | SCL_DIR_MASK | SCL_VAL_MASK, I810_GPIOA);
+        }
+#else
 	outlong((val ? SCL_VAL_OUT : 0) | SCL_DIR | SCL_DIR_MASK | SCL_VAL_MASK,
 	     I810_GPIOA);
+#endif
 }
 
 static void bit_i810ddc_setsda(void *data, int val)
 {
+#ifdef CONFIG_SNSC
+        if (val) {
+                outlong(SDA_DIR_MASK, I810_GPIOA);
+        } else {
+                outlong(SDA_DIR | SDA_DIR_MASK | SDA_VAL_MASK, I810_GPIOA);
+        }
+#else
  	outlong((val ? SDA_VAL_OUT : 0) | SDA_DIR | SDA_DIR_MASK | SDA_VAL_MASK,
 	     I810_GPIOA);
+#endif
 }
 
 static int bit_i810ddc_getscl(void *data)
 {
+#ifdef CONFIG_SNSC
+	outlong(SCL_DIR_MASK, I810_GPIOA);
+#else
 	outlong(0, I810_GPIOA);
+#endif
 	return (0 != (readlong(I810_GPIOA) & SCL_VAL_IN));
 }
 
 static int bit_i810ddc_getsda(void *data)
 {
+#ifdef CONFIG_SNSC
+	outlong(SDA_DIR_MASK, I810_GPIOA);
+#else
 	outlong(0, I810_GPIOA);
+#endif
 	return (0 != (readlong(I810_GPIOA) & SDA_VAL_IN));
 }
 

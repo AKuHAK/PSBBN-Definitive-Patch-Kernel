@@ -1,5 +1,5 @@
 /*
- * $Id: cfi_endian.h,v 1.10 2001/06/18 11:00:46 abz Exp $
+ * $Id: cfi_endian.h,v 1.11 2002/01/30 23:20:48 awozniak Exp $
  *
  */
 
@@ -33,7 +33,7 @@
 #define cpu_to_cfi64(x) cpu_to_le64(x)
 #define cfi16_to_cpu(x) le16_to_cpu(x)
 #define cfi32_to_cpu(x) le32_to_cpu(x)
-//#define cfi64_to_cpu(x)	le64_to_cpu(x)
+#define cfi64_to_cpu(x) le64_to_cpu(x)
 #elif defined (CFI_BIG_ENDIAN)
 #define cpu_to_cfi8(x) (x)
 #define cfi8_to_cpu(x) (x)
@@ -42,7 +42,7 @@
 #define cpu_to_cfi64(x) cpu_to_be64(x)
 #define cfi16_to_cpu(x) be16_to_cpu(x)
 #define cfi32_to_cpu(x) be32_to_cpu(x)
-//#define cfi64_to_cpu(x) be64_to_cpu(x)
+#define cfi64_to_cpu(x) be64_to_cpu(x)
 #elif defined (CFI_HOST_ENDIAN)
 #define cpu_to_cfi8(x) (x)
 #define cfi8_to_cpu(x) (x)

@@ -15,6 +15,7 @@
 #include <linux/pagemap.h>
 #include <linux/shm.h>
 #include <linux/compiler.h>
+#include <linux/security.h>
 
 #include <asm/pgtable.h>
 
@@ -735,6 +736,12 @@ asmlinkage long sys_swapoff(const char * specialfile)
 		}
 		prev = type;
 	}
+
+	if ((err = security_swapoff(p))) {
+		swap_list_unlock();
+		goto out_dput;
+	}
+
 	err = -EINVAL;
 	if (type < 0) {
 		swap_list_unlock();
@@ -913,6 +920,10 @@ asmlinkage long sys_swapon(const char * specialfile, int swap_flags)
 	p->swap_file = nd.dentry;
 	p->swap_vfsmnt = nd.mnt;
 	swap_inode = nd.dentry->d_inode;
+
+	if ((error = security_swapon(p)))
+		 goto bad_swap_2;
+
 	error = -EINVAL;
 
 	if (S_ISBLK(swap_inode->i_mode)) {

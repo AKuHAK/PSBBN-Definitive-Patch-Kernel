@@ -25,6 +25,7 @@
 #include <linux/module.h>
 #include <linux/interrupt.h>			/* For in_interrupt() */
 #include <linux/config.h>
+#include <linux/security.h>
 
 #include <asm/uaccess.h>
 
@@ -66,23 +67,6 @@ int oops_in_progress;
  */
 static DECLARE_MUTEX(console_sem);
 struct console *console_drivers;
-
-#ifdef CONFIG_BRINGUP_RAW_SERIAL_IO
-static void
-printk_bringup_write( char ch )
-{
-  extern void (*printk_bringup_raw_serial_io_putc)(char ch);
-
-  if ( ch == '\n' ) 
-  {
-    printk_bringup_raw_serial_io_putc( '\r' );
-  }
-
-  printk_bringup_raw_serial_io_putc( ch );
-
-  return;
-}
-#endif
 
 /*
  * logbuf_lock protects log_buf, log_start, log_end, con_start and logged_chars
@@ -184,6 +168,9 @@ int do_syslog(int type, char * buf, int len)
 	int do_clear = 0;
 	char c;
 	int error = 0;
+
+	if ((error = security_syslog(type)))
+		return error;
 
 	switch (type) {
 	case 0:		/* Close log */
@@ -394,10 +381,6 @@ static void call_console_drivers(unsigned long start, unsigned long end)
 
 static void emit_log_char(char c)
 {
-#ifdef CONFIG_BRINGUP_RAW_SERIAL_IO
-	printk_bringup_write( c );
-#else
-	//printk_bringup_write( c );
 	LOG_BUF(log_end) = c;
 	log_end++;
 	if (log_end - log_start > LOG_BUF_LEN)
@@ -406,7 +389,6 @@ static void emit_log_char(char c)
 		con_start = log_end - LOG_BUF_LEN;
 	if (logged_chars < LOG_BUF_LEN)
 		logged_chars++;
-#endif
 }
 
 /*
@@ -451,6 +433,13 @@ asmlinkage int printk(const char *fmt, ...)
 	 * appropriate log level tags, we insert them here
 	 */
 	for (p = printk_buf; *p; p++) {
+#if 0
+#if defined(CONFIG_DRAGONBALL_SNSC_MPU110) || defined(CONFIG_DRAGONBALL_SCALLOP) || defined(CONFIG_DRAGONBALL_NWRM) || defined(CONFIG_DRAGONBALL_EBOOK)
+            uart2_putc(*p);
+#else defined (CONFIG_DRAGONBALL_DICKTRACY)
+            uart1_putc(*p);
+#endif
+#endif
 		if (log_level_unknown) {
 			if (p[0] != '<' || p[1] < '0' || p[1] > '7' || p[2] != '>') {
 				emit_log_char('<');

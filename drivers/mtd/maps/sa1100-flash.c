@@ -3,12 +3,13 @@
  * 
  * (C) 2000 Nicolas Pitre <nico@cam.org>
  * 
- * $Id: sa1100-flash.c,v 1.22 2001/10/02 10:04:52 rmk Exp $
+ * $Id: sa1100-flash.c,v 1.29 2002/09/06 14:36:19 abz Exp $
  */
 
 #include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
+#include <linux/ioport.h>
 #include <linux/kernel.h>
 
 #include <linux/mtd/mtd.h>
@@ -66,20 +67,6 @@ static void sa1100_copy_to(struct map_info *map, unsigned long to, const void *f
 	memcpy((void *)(map->map_priv_1 + to), from, len);
 }
 
-
-#ifdef CONFIG_SA1100_JORNADA720
-
-static void jornada720_set_vpp(int vpp)
-{
-	if (vpp)
-		PPSR |= 0x80;
-	else
-		PPSR &= ~0x80;
-	PPDR |= 0x80;
-}
-
-#endif
-
 static struct map_info sa1100_map = {
 	name:		"SA1100 flash",
 	read8:		sa1100_read8,
@@ -92,6 +79,7 @@ static struct map_info sa1100_map = {
 	copy_to:	sa1100_copy_to,
 
 	map_priv_1:	WINDOW_ADDR,
+	map_priv_2:	-1,
 };
 
 
@@ -110,7 +98,7 @@ static struct map_info sa1100_map = {
  */
 
 #ifdef CONFIG_SA1100_ADSBITSY
-static unsigned long adsbitsy_max_flash_size = 0x02000000;
+#define ADSBITSY_FLASH_SIZE		0x02000000
 static struct mtd_partition adsbitsy_partitions[] = {
 	{
 		name:		"bootROM",
@@ -137,7 +125,7 @@ static struct mtd_partition adsbitsy_partitions[] = {
 
 #ifdef CONFIG_SA1100_ASSABET
 /* Phase 4 Assabet has two 28F160B3 flash parts in bank 0: */
-static unsigned long assabet4_max_flash_size = 0x00400000;
+#define ASSABET4_FLASH_SIZE		0x00400000
 static struct mtd_partition assabet4_partitions[] = {
 	{
 		name:		"bootloader",
@@ -157,7 +145,7 @@ static struct mtd_partition assabet4_partitions[] = {
 };
 
 /* Phase 5 Assabet has two 28F128J3A flash parts in bank 0: */
-static unsigned long assabet5_max_flash_size = 0x02000000;
+#define ASSABET5_FLASH_SIZE		0x02000000
 static struct mtd_partition assabet5_partitions[] = {
 	{
 		name:		"bootloader",
@@ -176,13 +164,44 @@ static struct mtd_partition assabet5_partitions[] = {
 	}
 };
 
-#define assabet_max_flash_size assabet5_max_flash_size
-#define assabet_partitions     assabet5_partitions
+#define ASSABET_FLASH_SIZE	ASSABET5_FLASH_SIZE
+#define assabet_partitions	assabet5_partitions
 #endif
+
+#ifdef CONFIG_SA1100_BADGE4
+
+/*
+ * 1 x Intel 28F320C3BA100 Advanced+ Boot Block Flash (32 Mi bit)
+ *   Eight 4 KiW Parameter Bottom Blocks (64 KiB)
+ *   Sixty-three 32 KiW Main Blocks (4032 Ki b)
+ */
+#define BADGE4_FLASH_SIZE		0x00400000
+static struct mtd_partition badge4_partitions[] = {
+	{
+		name:		"BLOB boot loader",
+		offset:		0,
+		size:		0x0000A000
+	}, {
+		name:		"params",
+		offset:		MTDPART_OFS_APPEND,
+		size:		0x00006000
+	}, {
+		name:		"kernel",
+		offset:		MTDPART_OFS_APPEND,
+		size:		0x00100000
+	}, {
+		name:		"root",
+		offset:		MTDPART_OFS_APPEND,
+		size:		MTDPART_SIZ_FULL
+	}
+};
+
+#endif
+
 
 #ifdef CONFIG_SA1100_CERF
 #ifdef CONFIG_SA1100_CERF_FLASH_32MB
-static unsigned long cerf_max_flash_size = 0x02000000;
+#define CERF_FLASH_SIZE			0x02000000
 static struct mtd_partition cerf_partitions[] = {
 	{
 		name:		"firmware",
@@ -203,7 +222,7 @@ static struct mtd_partition cerf_partitions[] = {
 	}
 };
 #elif defined CONFIG_SA1100_CERF_FLASH_16MB
-static unsigned long cerf_max_flash_size = 0x01000000;
+#define CERF_FLASH_SIZE			0x01000000
 static struct mtd_partition cerf_partitions[] = {
 	{
 		name:		"firmware",
@@ -230,9 +249,47 @@ static struct mtd_partition cerf_partitions[] = {
 #endif
 #endif
 
+#ifdef CONFIG_SA1100_CONSUS
+#define CONSUS_FLASH_SIZE		0x02000000
+static struct mtd_partition consus_partitions[] = {
+	{
+		name:		"Consus boot firmware",
+		offset:		0,
+		size:		0x00040000,
+		mask_flags:	MTD_WRITABLE, /* force read-only */
+	}, {
+		name:		"Consus kernel",
+		offset:		0x00040000,
+		size:		0x00100000,
+		mask_flags:	0,
+	}, {
+		name:		"Consus disk",
+		offset:		0x00140000,
+		/* The rest (up to 16M) for jffs.  We could put 0 and
+		   make it find the size automatically, but right now
+		   i have 32 megs.  jffs will use all 32 megs if given
+		   the chance, and this leads to horrible problems
+		   when you try to re-flash the image because blob
+		   won't erase the whole partition. */
+		size:		0x01000000 - 0x00140000,
+		mask_flags:	0,
+	}, {
+		/* this disk is a secondary disk, which can be used as
+		   needed, for simplicity, make it the size of the other
+		   consus partition, although realistically it could be
+		   the remainder of the disk (depending on the file
+		   system used) */
+		 name:		"Consus disk2",
+		 offset:	0x01000000,
+		 size:		0x01000000 - 0x00140000,
+		 mask_flags:	0,
+	}
+};
+#endif
+
 #ifdef CONFIG_SA1100_FLEXANET
 /* Flexanet has two 28F128J3A flash parts in bank 0: */
-static unsigned long flexanet_max_flash_size = 0x02000000;
+#define FLEXANET_FLASH_SIZE		0x02000000
 static struct mtd_partition flexanet_partitions[] = {
 	{
 		name:		"bootloader",
@@ -279,7 +336,7 @@ static struct mtd_partition flexanet_partitions[] = {
 #endif
 
 #ifdef CONFIG_SA1100_FREEBIRD
-static unsigned long freebird_max_flash_size = 0x02000000;
+#define FREEBIRD_FLASH_SIZE		0x02000000
 static struct mtd_partition freebird_partitions[] = {
 #if CONFIG_SA1100_FREEBIRD_NEW
 	{
@@ -330,8 +387,37 @@ static struct mtd_partition freebird_partitions[] = {
 };
 #endif
 
+#ifdef CONFIG_SA1100_FRODO
+/* Frodo has 2 x 16M 28F128J3A flash chips in bank 0: */
+#define FRODO_FLASH_SIZE		0x02000000
+static struct mtd_partition frodo_partitions[] =
+{
+	{
+		name:		"Boot Loader",
+		size:		0x00040000,
+		offset:		0x00000000
+	}, {
+		name:		"Parameter Block",
+		size:		0x00040000,
+		offset:		MTDPART_OFS_APPEND
+	}, {
+		name:		"Linux Kernel",
+		size:		0x00100000,
+		offset:		MTDPART_OFS_APPEND
+	}, {
+		name:		"Ramdisk",
+		size:		0x00680000,
+		offset:		MTDPART_OFS_APPEND
+	}, {
+		name:		"Flash File System",
+		size:		MTDPART_SIZ_FULL,
+		offset:		MTDPART_OFS_APPEND
+	}
+};
+#endif
+
 #ifdef CONFIG_SA1100_GRAPHICSCLIENT
-static unsigned long graphicsclient_max_flash_size = 0x02000000;
+#define GRAPHICSCLIENT_FLASH_SIZE	0x02000000
 static struct mtd_partition graphicsclient_partitions[] = {
 	{
 		name:		"zImage",
@@ -352,7 +438,7 @@ static struct mtd_partition graphicsclient_partitions[] = {
 #endif
 
 #ifdef CONFIG_SA1100_GRAPHICSMASTER
-static unsigned long graphicsmaster_max_flash_size = 0x01000000;
+#define GRAPHICSMASTER_FLASH_SIZE	0x01000000
 static struct mtd_partition graphicsmaster_partitions[] = {
 	{
 		name:		"zImage",
@@ -375,7 +461,7 @@ static struct mtd_partition graphicsmaster_partitions[] = {
 #endif
 
 #ifdef CONFIG_SA1100_H3600
-static unsigned long h3600_max_flash_size = 0x02000000;
+#define H3600_FLASH_SIZE		0x02000000
 static struct mtd_partition h3600_partitions[] = {
 	{
 		name:		"H3600 boot firmware",
@@ -422,7 +508,7 @@ static void h3600_set_vpp(struct map_info *map, int vpp)
 #endif
 
 #ifdef CONFIG_SA1100_HUW_WEBPANEL
-static unsigned long huw_webpanel_max_flash_size = 0x01000000;
+#define HUW_WEBPANEL_FLASH_SIZE		0x01000000
 static struct mtd_partition huw_webpanel_partitions[] = {
 	{
 		name:		"Loader",
@@ -440,7 +526,7 @@ static struct mtd_partition huw_webpanel_partitions[] = {
 #endif
 
 #ifdef CONFIG_SA1100_JORNADA720
-static unsigned long jornada720_max_flash_size = 0x02000000;
+#define JORNADA720_FLASH_SIZE		0x02000000
 static struct mtd_partition jornada720_partitions[] = {
 	{
 		name:		"JORNADA720 boot firmware",
@@ -473,10 +559,20 @@ static struct mtd_partition jornada720_partitions[] = {
 		offset:		0x00d00000,
 	}
 };
+
+static void jornada720_set_vpp(int vpp)
+{
+	if (vpp)
+		PPSR |= 0x80;
+	else
+		PPSR &= ~0x80;
+	PPDR |= 0x80;
+}
+
 #endif
 
 #ifdef CONFIG_SA1100_PANGOLIN
-static unsigned long pangolin_max_flash_size = 0x04000000;
+#define PANGOLIN_FLASH_SIZE		0x04000000
 static struct mtd_partition pangolin_partitions[] = {
 	{
 		name:		"boot firmware",
@@ -501,7 +597,7 @@ static struct mtd_partition pangolin_partitions[] = {
 
 #ifdef CONFIG_SA1100_PT_SYSTEM3
 /* erase size is 0x40000 == 256k partitions have to have this boundary */
-static unsigned long system3_max_flash_size = 0x01000000;
+#define SYSTEM3_FLASH_SIZE		0x01000000
 static struct mtd_partition system3_partitions[] = {
 	{
 		name:		"BLOB",
@@ -525,8 +621,7 @@ static struct mtd_partition system3_partitions[] = {
 #endif
 
 #ifdef CONFIG_SA1100_SHANNON
-
-static unsigned long shannon_max_flash_size = 0x400000;
+#define SHANNON_FLASH_SIZE		0x00400000
 static struct mtd_partition shannon_partitions[] = {
 	{
 		name: "BLOB boot loader",
@@ -548,7 +643,7 @@ static struct mtd_partition shannon_partitions[] = {
 #endif
 
 #ifdef CONFIG_SA1100_SHERMAN
-static unsigned long sherman_max_flash_size = 0x02000000;
+#define SHERMAN_FLASH_SIZE		0x02000000
 static struct mtd_partition sherman_partitions[] = {
 	{
 		size:		0x50000,
@@ -567,7 +662,7 @@ static struct mtd_partition sherman_partitions[] = {
 #endif
 
 #ifdef CONFIG_SA1100_SIMPAD
-static unsigned long simpad_max_flash_size = 0x02000000;
+#define SIMPAD_FLASH_SIZE		0x02000000
 static struct mtd_partition simpad_partitions[] = {
 	{
 		name:		"SIMpad boot firmware",
@@ -605,7 +700,7 @@ static struct mtd_partition simpad_partitions[] = {
 #endif /* CONFIG_SA1100_SIMPAD */
 
 #ifdef CONFIG_SA1100_STORK
-static unsigned long stork_max_flash_size = 0x02000000;
+#define STORK_FLASH_SIZE		0x02000000
 static struct mtd_partition stork_partitions[] = {
 	{
 		name:		"STORK boot firmware",
@@ -647,7 +742,7 @@ static struct mtd_partition stork_partitions[] = {
 #endif
 
 #ifdef CONFIG_SA1100_YOPY
-static unsigned long yopy_max_flash_size = 0x08000000;
+#define YOPY_FLASH_SIZE			0x08000000
 static struct mtd_partition yopy_partitions[] = {
 	{
 		name:		"boot firmware",
@@ -670,44 +765,6 @@ static struct mtd_partition yopy_partitions[] = {
 };
 #endif
 
-#ifdef CONFIG_SA1100_PFS168
-static unsigned long pfs168_max_flash_size = 0x02000000;
-static struct mtd_partition pfs168_partitions[] = {
-	{
-		name:	"PFS-168 Boot Loader",
-		offset:	0x00000000,
-		size:	0x00040000,
-		mask_flags: MTD_WRITEABLE	/* force read-only */
-	},
-	{
-		name:	"params",
-		offset:	MTDPART_OFS_APPEND,
-		size:	0x00040000
-	},
-	{
-		name:	"vmlinuz",
-		offset:	MTDPART_OFS_APPEND,
-		size:	0x000c0000
-	},
-	{
-		name:	"init",
-		offset:	MTDPART_OFS_APPEND,
-		size:	0x000c0000
-	},
-	{
-		name:	"root",
-		offset:	MTDPART_OFS_APPEND,
-		size:	0x00e00000
-	},
-	{
-		name:	"jffs2",
-		offset:	MTDPART_OFS_APPEND,
-		size:	MTDPART_SIZ_FULL
-	},
-};
-#endif
-
-  
 extern int parse_redboot_partitions(struct mtd_info *master, struct mtd_partition **pparts);
 extern int parse_bootldr_partitions(struct mtd_info *master, struct mtd_partition **pparts);
 
@@ -717,9 +774,10 @@ static struct mtd_info *mymtd;
 int __init sa1100_mtd_init(void)
 {
 	struct mtd_partition *parts;
-	int nb_parts = 0;
+	int nb_parts = 0, ret;
 	int parsed_nr_parts = 0;
 	const char *part_type;
+	unsigned long base = -1UL;
 
 	/* Default flash buswidth */
 	sa1100_map.buswidth = (MSC0 & MSC_RBW) ? 2 : 4;
@@ -733,7 +791,7 @@ int __init sa1100_mtd_init(void)
 	if (machine_is_adsbitsy()) {
 		parts = adsbitsy_partitions;
 		nb_parts = ARRAY_SIZE(adsbitsy_partitions);
-		sa1100_map.size = adsbitsy_max_flash_size;
+		sa1100_map.size = ADSBITSY_FLASH_SIZE;
 		sa1100_map.buswidth = (MSC1 & MSC_RBW) ? 2 : 4;
 	}
 #endif
@@ -741,35 +799,57 @@ int __init sa1100_mtd_init(void)
 	if (machine_is_assabet()) {
 		parts = assabet_partitions;
 		nb_parts = ARRAY_SIZE(assabet_partitions);
-		sa1100_map.size = assabet_max_flash_size;
+		sa1100_map.size = ASSABET_FLASH_SIZE;
+	}
+#endif
+#ifdef CONFIG_SA1100_BADGE4
+	if (machine_is_badge4()) {
+		parts = badge4_partitions;
+		nb_parts = ARRAY_SIZE(badge4_partitions);
+		sa1100_map.size = BADGE4_FLASH_SIZE;
 	}
 #endif
 #ifdef CONFIG_SA1100_CERF
 	if (machine_is_cerf()) {
 		parts = cerf_partitions;
 		nb_parts = ARRAY_SIZE(cerf_partitions);
-		sa1100_map.size = cerf_max_flash_size;
+		sa1100_map.size = CERF_FLASH_SIZE;
+	}
+#endif
+#ifdef CONFIG_SA1100_CONSUS
+	if (machine_is_consus()) {
+		parts = consus_partitions;
+		nb_parts = ARRAY_SIZE(consus_partitions);
+		sa1100_map.size = CONSUS_FLASH_SIZE;
 	}
 #endif
 #ifdef CONFIG_SA1100_FLEXANET
 	if (machine_is_flexanet()) {
 		parts = flexanet_partitions;
 		nb_parts = ARRAY_SIZE(flexanet_partitions);
-		sa1100_map.size = flexanet_max_flash_size;
+		sa1100_map.size = FLEXANET_FLASH_SIZE;
 	}
 #endif
 #ifdef CONFIG_SA1100_FREEBIRD
 	if (machine_is_freebird()) {
 		parts = freebird_partitions;
 		nb_parts = ARRAY_SIZE(freebird_partitions);
-		sa1100_map.size = freebird_max_flash_size;
+		sa1100_map.size = FREEBIRD_FLASH_SIZE;
+	}
+#endif
+#ifdef CONFIG_SA1100_FRODO
+	if (machine_is_frodo()) {
+		parts = frodo_partitions;
+		nb_parts = ARRAY_SIZE(frodo_partitions);
+		sa1100_map.size = FRODO_FLASH_SIZE;
+		base = 0x00000000;
 	}
 #endif
 #ifdef CONFIG_SA1100_GRAPHICSCLIENT
 	if (machine_is_graphicsclient()) {
 		parts = graphicsclient_partitions;
 		nb_parts = ARRAY_SIZE(graphicsclient_partitions);
-		sa1100_map.size = graphicsclient_max_flash_size;
+		sa1100_map.size = GRAPHICSCLIENT_FLASH_SIZE;
 		sa1100_map.buswidth = (MSC1 & MSC_RBW) ? 2:4;
 	}
 #endif
@@ -777,7 +857,7 @@ int __init sa1100_mtd_init(void)
 	if (machine_is_graphicsmaster()) {
 		parts = graphicsmaster_partitions;
 		nb_parts = ARRAY_SIZE(graphicsmaster_partitions);
-		sa1100_map.size = graphicsmaster_max_flash_size;
+		sa1100_map.size = GRAPHICSMASTER_FLASH_SIZE;
 		sa1100_map.buswidth = (MSC1 & MSC_RBW) ? 2:4;
 	}
 #endif
@@ -785,7 +865,7 @@ int __init sa1100_mtd_init(void)
 	if (machine_is_h3600()) {
 		parts = h3600_partitions;
 		nb_parts = ARRAY_SIZE(h3600_partitions);
-		sa1100_map.size = h3600_max_flash_size;
+		sa1100_map.size = H3600_FLASH_SIZE;
 		sa1100_map.set_vpp = h3600_set_vpp;
 	}
 #endif
@@ -793,14 +873,14 @@ int __init sa1100_mtd_init(void)
 	if (machine_is_huw_webpanel()) {
 		parts = huw_webpanel_partitions;
 		nb_parts = ARRAY_SIZE(huw_webpanel_partitions);
-		sa1100_map.size = huw_webpanel_max_flash_size;
+		sa1100_map.size = HUW_WEBPANEL_FLASH_SIZE;
 	}
 #endif
 #ifdef CONFIG_SA1100_JORNADA720
 	if (machine_is_jornada720()) {
 		parts = jornada720_partitions;
 		nb_parts = ARRAY_SIZE(jornada720_partitions);
-		sa1100_map.size = jornada720_max_flash_size;
+		sa1100_map.size = JORNADA720_FLASH_SIZE;
 		sa1100_map.set_vpp = jornada720_set_vpp;
 	}
 #endif
@@ -808,58 +888,65 @@ int __init sa1100_mtd_init(void)
 	if (machine_is_pangolin()) {
 		parts = pangolin_partitions;
 		nb_parts = ARRAY_SIZE(pangolin_partitions);
-		sa1100_map.size = pangolin_max_flash_size;
+		sa1100_map.size = PANGOLIN_FLASH_SIZE;
 	}
 #endif
 #ifdef CONFIG_SA1100_PT_SYSTEM3
 	if (machine_is_pt_system3()) {
 		parts = system3_partitions;
 		nb_parts = ARRAY_SIZE(system3_partitions);
-		sa1100_map.size = system3_max_flash_size;
-	}
-#endif
-#ifdef CONFIG_SA1100_SHERMAN
-	if (machine_is_sherman()) {
-		parts = sherman_partitions;
-		nb_parts = ARRAY_SIZE(sherman_partitions);
-		sa1100_map.size = sherman_max_flash_size;
-	}
-#endif
-#ifdef CONFIG_SA1100_SIMPAD
-	if (machine_is_simpad()) {
-		parts = simpad_partitions;
-		nb_parts = ARRAY_SIZE(simpad_partitions);
-		sa1100_map.size = simpad_max_flash_size;
-	}
-#endif
-#ifdef CONFIG_SA1100_STORK
-	if (machine_is_stork()) {
-		parts = stork_partitions;
-		nb_parts = ARRAY_SIZE(stork_partitions);
-		sa1100_map.size = stork_max_flash_size;
-	}
-#endif
-#ifdef CONFIG_SA1100_YOPY
-	if (machine_is_yopy()) {
-		parts = yopy_partitions;
-		nb_parts = ARRAY_SIZE(yopy_partitions);
-		sa1100_map.size = yopy_max_flash_size;
-	}
-#endif
-#ifdef CONFIG_SA1100_PFS168
-	if (machine_is_pfs168()) {
-		parts = pfs168_partitions;
-		nb_parts = ARRAY_SIZE(pfs168_partitions);
-		sa1100_map.size = pfs168_max_flash_size;
+		sa1100_map.size = SYSTEM3_FLASH_SIZE;
 	}
 #endif
 #ifdef CONFIG_SA1100_SHANNON
 	if (machine_is_shannon()) {
 		parts = shannon_partitions;
 		nb_parts = ARRAY_SIZE(shannon_partitions);
-		sa1100_map.size = shannon_max_flash_size;
+		sa1100_map.size = SHANNON_FLASH_SIZE;
 	}
 #endif
+#ifdef CONFIG_SA1100_SHERMAN
+	if (machine_is_sherman()) {
+		parts = sherman_partitions;
+		nb_parts = ARRAY_SIZE(sherman_partitions);
+		sa1100_map.size = SHERMAN_FLASH_SIZE;
+	}
+#endif
+#ifdef CONFIG_SA1100_SIMPAD
+	if (machine_is_simpad()) {
+		parts = simpad_partitions;
+		nb_parts = ARRAY_SIZE(simpad_partitions);
+		sa1100_map.size = SIMPAD_FLASH_SIZE;
+	}
+#endif
+#ifdef CONFIG_SA1100_STORK
+	if (machine_is_stork()) {
+		parts = stork_partitions;
+		nb_parts = ARRAY_SIZE(stork_partitions);
+		sa1100_map.size = STORK_FLASH_SIZE;
+	}
+#endif
+#ifdef CONFIG_SA1100_YOPY
+	if (machine_is_yopy()) {
+		parts = yopy_partitions;
+		nb_parts = ARRAY_SIZE(yopy_partitions);
+		sa1100_map.size = YOPY_FLASH_SIZE;
+	}
+#endif
+
+	/*
+	 * For simple flash devices, use ioremap to map the flash.
+	 */
+	if (base != (unsigned long)-1) {
+		if (!request_mem_region(base, sa1100_map.size, "flash"))
+			return -EBUSY;
+		sa1100_map.map_priv_2 = base;
+		sa1100_map.map_priv_1 = (unsigned long)
+				ioremap(base, sa1100_map.size);
+		ret = -ENOMEM;
+		if (!sa1100_map.map_priv_1)
+			goto out_err;
+	}
 
 	/*
 	 * Now let's probe for the actual flash.  Do it here since
@@ -867,8 +954,9 @@ int __init sa1100_mtd_init(void)
 	 */
 	printk(KERN_NOTICE "SA1100 flash: probing %d-bit flash bus\n", sa1100_map.buswidth*8);
 	mymtd = do_map_probe("cfi_probe", &sa1100_map);
+	ret = -ENXIO;
 	if (!mymtd)
-		return -ENXIO;
+		goto out_err;
 	mymtd->module = THIS_MODULE;
 
 	/*
@@ -884,11 +972,11 @@ int __init sa1100_mtd_init(void)
 		}
 	}
 #endif
-#ifdef CONFIG_MTD_BOOTLDR_PARTS
+#ifdef CONFIG_MTD_CMDLINE_PARTS
 	if (parsed_nr_parts == 0) {
-		int ret = parse_bootldr_partitions(mymtd, &parsed_parts);
+		int ret = parse_cmdline_partitions(mymtd, &parsed_parts, "sa1100");
 		if (ret > 0) {
-			part_type = "Compaq bootldr";
+			part_type = "Command Line";
 			parsed_nr_parts = ret;
 		}
 	}
@@ -907,6 +995,13 @@ int __init sa1100_mtd_init(void)
 		add_mtd_partitions(mymtd, parts, nb_parts);
 	}
 	return 0;
+
+ out_err:
+	if (sa1100_map.map_priv_2 != -1) {
+		iounmap((void *)sa1100_map.map_priv_1);
+		release_mem_region(sa1100_map.map_priv_2, sa1100_map.size);
+	}
+	return ret;
 }
 
 static void __exit sa1100_mtd_cleanup(void)
@@ -916,6 +1011,10 @@ static void __exit sa1100_mtd_cleanup(void)
 		map_destroy(mymtd);
 		if (parsed_parts)
 			kfree(parsed_parts);
+	}
+	if (sa1100_map.map_priv_2 != -1) {
+		iounmap((void *)sa1100_map.map_priv_1);
+		release_mem_region(sa1100_map.map_priv_2, sa1100_map.size);
 	}
 }
 

@@ -42,7 +42,14 @@ if [ "$CONFIG_ARM" = "y" ]; then
   if [ "$CONFIG_SERIAL_IXP1200_CONSOLE" = "y" ]; then
      int  '  Default IXP1200 serial baudrate' CONFIG_IXP1200_DEFAULT_BAUDRATE 9600
   fi
+
+  dep_tristate 'DragonBall serial port support' CONFIG_SERIAL_DRAGONBALL $CONFIG_ARCH_DRAGONBALL
+  dep_bool '  Console on Dragon Ball serial port' CONFIG_SERIAL_DRAGONBALL_CONSOLE $CONFIG_SERIAL_DRAGONBALL
+  if [ "$CONFIG_SERIAL_DRAGONBALL_CONSOLE" = "y" -o "$CONFIG_SERIAL_DRAGONBALL_CONSOLE" = "m" ]; then
+     int  '  Default DragonBall serial baudrate' CONFIG_DRAGONBALL_DEFAULT_BAUDRATE 115200
+  fi
 fi
+
 #
 # The new 8250/16550 serial drivers
 dep_tristate '8250/16550 and compatible serial support (EXPERIMENTAL)' CONFIG_SERIAL_8250 $CONFIG_EXPERIMENTAL
@@ -62,6 +69,7 @@ if [ "$CONFIG_SERIAL_AMBA" = "y" -o \
      "$CONFIG_SERIAL_ANAKIN" = "y" -o \
      "$CONFIG_SERIAL_UART00" = "y" -o \
      "$CONFIG_SERIAL_8250" = "y" -o \
+     "$CONFIG_SERIAL_DRAGONBALL" = "y" -o \
      "$CONFIG_SERIAL_IXP1200" = "y" ]; then
    define_bool CONFIG_SERIAL_CORE y
 else
@@ -72,6 +80,7 @@ else
         "$CONFIG_SERIAL_ANAKIN" = "m" -o \
         "$CONFIG_SERIAL_UART00" = "m" -o \
         "$CONFIG_SERIAL_8250" = "m" -o \
+        "$CONFIG_SERIAL_DRAGONBALL" = "m" -o \
 	"$CONFIG_SERIAL_IXP1200" = "m" ]; then
       define_bool CONFIG_SERIAL_CORE m
    fi
@@ -83,6 +92,7 @@ if [ "$CONFIG_SERIAL_AMBA_CONSOLE" = "y" -o \
      "$CONFIG_SERIAL_ANAKIN_CONSOLE" = "y" -o \
      "$CONFIG_SERIAL_UART00_CONSOLE" = "y" -o \
      "$CONFIG_SERIAL_8250_CONSOLE" = "y" -o \
+        "$CONFIG_SERIAL_DRAGONBALL" = "y" -o \
      "$CONFIG_SERIAL_IXP1200_CONSOLE" = "y" ]; then
    define_bool CONFIG_SERIAL_CORE_CONSOLE y
 fi

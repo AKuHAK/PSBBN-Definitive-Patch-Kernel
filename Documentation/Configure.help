@@ -1,3 +1,4 @@
+# $USAGI: Configure.help,v 1.67 2002/03/01 08:20:25 yoshfuji Exp $
 # Maintained by:
 #	Eric S. Raymond <mailto:esr@thyrsus.com>
 #	Steven Cole <mailto:elenstev@mesatop.com>
@@ -1911,6 +1912,120 @@ CONFIG_MD_MULTIPATH
 
   If unsure, say N.
 
+# BEGINNING OF CRYPTOAPI
+Cryptographic API
+CONFIG_CRYPTO
+  If you answer yes to this option, the cryptographic kernel API
+  framework will be enabled, and you'll be presented with additional
+  questions about cryptographic algorithms and kernel components
+  making use of the cryptographic API.
+
+  See also <file:Documentation/crypto/cryptoapi.txt>
+
+  The latest version of this component can be found at
+  <http://www.kernel.org/pub/linux/crypto/>
+
+  If you don't need cryptographic extensions, say N.
+
+Generic cryptogrpahic filter for loop device driver
+CONFIG_CRYPTOLOOP
+  If you answer yes to this option, the loop driver will be able to
+  use all cryptographic ciphers selected below.
+
+  This loop filter will use the ciphers in CBC-mode which is more
+  secure than ECB-mode.  This module will also initialize the CBC-mode
+  of the cipher with the block-number of the block being encrypted.
+
+  Make sure you have patched your loop driver otherwise this filter
+  won't compile. See <file:Documentation/crypto/cryptoloop.txt> for
+  more information.
+
+  *WARNING* Due to the broken IV metric in the 2.4.x kernel series,
+  this filter is not compatible with the on-disc format of encrypted
+  volumes encrypted up to version 2.4.3 of the international patch! 
+  You will have to convert your "old" encrypted volumes to the new IV
+  metric.
+
+Crypto ciphers
+CONFIG_CIPHERS
+  Ciphers basically help us scramble data so that other people don't
+  get access to it. Useful applications for this include hiding hard
+  drive contents or network traffic from unauthorized eyes. Compare a
+  file encrypted with a cipher with very good safe: The document is in
+  it, you can carry the document with you (if the safe is not too
+  heavy), but others can steal it, too. However, they will not be able
+  to read the document if the safe is any good.
+
+  Mathematically speaking, a cipher is a parameter-dependant function
+  E(K, ) that takes a fixed-length block M (usually 64 or 128 bits)
+  and maps it onto another (usually equal-sized) block C=E(K,M) in such
+  a way that, without knowledge of the "key" K, it is hard to compute
+
+  1. M, if C and the function E are given,
+
+  2. C, if M is given and the function E is known.
+
+  M is called the 'plaintext' and C the 'ciphertext'. The above
+  properties are commonly described as "All the security of the cipher
+  lies in its key". However, there always exists the inverse function
+  D(K, ) of E(K, ) such that D(K,E(K,M))=M for any M.  The ideal
+  cipher is one where it is impossible to compute M if you have C, but
+  not K. In this case, the easiest way to break the cipher is to use
+  'brute-force', i.e. try all K in turn until you hit the right
+  one. With most ciphers in this library, K is a 128-bit number. Here,
+  brute-force attacks are infeasible since they require testing all
+  2^128 possible keys K, which would take far too long on any
+  conceivable computer (some big multiple of the age of the universe
+  for example).
+
+  Unfortunately, the ideal cipher has not been found yet, so most
+  ciphers in this library, or certain 'reduced-round' versions
+  thereof, can be broken faster than brute-force. A cipher is secure,
+  if it cannot be broken _much_ faster than brute-force and
+  brute-force is infeasible.
+
+  If you say 'Y' or 'M' here, you are able to select a variety of
+  ciphers for the Cipher-API. Ciphers you select below can then be
+  used by cryptographic kernel modules. If you say 'N' here, those
+  modules will use their own implementations or even not work at all.
+
+  If unsure, say 'N'.
+
+Digest algorithms
+CONFIG_DIGESTS
+  A message digest (or 'one-way function' or 'hash') is a function H
+  that maps an arbitrary-length message M onto a 128-bit or 160-bit
+  number h=H(M) such that the following conditions are satisfied:
+
+  1. For a given M, it is easy to compute h=H(M).
+
+  2. For a given h, it is hard to find M such that h=H(M).
+
+  3. For a given M, it is hard to find another message M' such that
+     H(M')=H(M).
+
+  4. It is hard to find M, M' such that H(M)=H(M').
+
+  This makes the name 'one-way function' plausible. Hashes are widely
+  used by cryptographic programs. E.g. the Linux kernel uses a hash to
+  generate random numbers.
+
+# Marc Mutz <Marc@Mutz.com>: this will be the help text, once this
+# functionality is in place:
+#  If you say 'Y' here and select the SHA-1 message digest below,
+#  then the drivers for /dev/random and /dev/urandom will use the
+#  digest api instead of their own implementation. This will not work
+#  if you build as modules.
+#
+  If you say 'Y' or 'M' here, cryptographic modules are able to use
+  the Digest-API if they need a hash function. If you say 'N' here,
+  they will use their own implementations (which will probably
+  increase the size of the compiled kernel if there are more than one
+  such modules).
+
+  If unsure, say 'N'.
+# END OF CRYPTOAPI
+
 Support for IDE Raid controllers
 CONFIG_BLK_DEV_ATARAID
   Say Y or M if you have an IDE Raid controller and want linux
@@ -2355,12 +2470,6 @@ CONFIG_CPU_LITTLE_ENDIAN
   byte order. These modes require different kernels. Say Y if your
   machine is little endian, N if it's a big endian machine.
 
-Addition of buserr workaround for JMR3927 board
-CONFIG_TX39_BUSERR_BUG_WORKAROUND
-  A hang immediately following bus error can happen if TOE 
-  (timeout enable for bus error) is set.
-  Select this workaround if enabling toeon in the cmdline.
-
 Use power LED as a heartbeat
 CONFIG_HEARTBEAT
   Use the power-on LED on your machine as a load meter.  The exact
@@ -2517,6 +2626,15 @@ CONFIG_IP_NF_MATCH_LIMIT
 
   If you want to compile it as a module, say M here and read
   <file:Documentation/modules.txt>.  If unsure, say `N'.
+
+Aggregated address check (EXPERIMENTAL)
+CONFIG_IP6_NF_MATCH_AGR
+  This module is perform checking on the IPv6 IP address
+  Compares the last 64 bits with the aggregated (delivered
+  from the MAC address)
+
+  If you want to compile it as a module, say M here and read
+  Documentation/modules.txt.  If unsure, say `N'.
 
 MAC address match support
 CONFIG_IP_NF_MATCH_MAC
@@ -2727,6 +2845,15 @@ CONFIG_IP_NF_MATCH_TCPMSS
   If you want to compile it as a module, say M here and read
   <file:Documentation/modules.txt>.  If unsure, say `N'.
 
+REJECT target support
+CONFIG_IP6_NF_TARGET_REJECT
+  The REJECT target allows a filtering rule to specify that an ICMPv6
+  error should be issued in response to an incoming packet, rather
+  than silently being dropped.
+
+  If you want to compile it as a module, say M here and read
+  Documentation/modules.txt.  If unsure, say `N'.
+
 LOG target support
 CONFIG_IP_NF_TARGET_LOG
   This option adds a `LOG' target, which allows you to create rules in
@@ -2770,6 +2897,14 @@ CONFIG_IP6_NF_MATCH_MARK
   Netfilter mark matching allows you to match packets based on the
   `nfmark' value in the packet.  This can be set by the MARK target
   (see below).
+
+  If you want to compile it as a module, say M here and read
+  <file:Documentation/modules.txt>.  If unsure, say `N'.
+
+length match support
+CONFIG_IP6_NF_MATCH_LENGTH
+  This option allows you to match the length of a packet against a
+  specific value or range of values.
 
   If you want to compile it as a module, say M here and read
   <file:Documentation/modules.txt>.  If unsure, say `N'.
@@ -2820,6 +2955,54 @@ CONFIG_IP6_NF_TARGET_MARK
 
   If you want to compile it as a module, say M here and read
   <file:Documentation/modules.txt>.  If unsure, say `N'.
+
+IP Security Support (IPsec)
+CONFIG_IPSEC
+
+  You can say Y here if you want to enable IPsec.
+  This options enable PF_KEY(V2), Security Association Database and
+  Security Policy Database.
+
+  And also you must enable each IP version IPsec.
+
+IP Security Support (IPsec) debugging
+CONFIG_IPSEC_DEBUG
+
+  You can say Y here if you want to get additional messages useful in
+  debugging the IPsec(IPsec6,PFKEY,SADB,SPD) code. 
+
+  You can enable/disable these parameters via sysctl(/proc/net/ipsec/).
+
+IP Security Support (IPsec) debugging off by default
+CONFIG_IPSEC_DEBUG_DISABLE_DEFAULT
+
+  Normally IPsec debugging messages are activated by default, 
+  if you set CONFIG_IPSEC_DEBUG.
+
+  If you say Y here, it'll change this to off by default(boot time).
+  NOTICE: If you don't say Y here, you will receive tons of log messages.
+
+IPv6 Security Support (IPsec for IPv6)
+CONFIG_IPV6_IPSEC
+  In the specification of IPv6, IPsec support is mandatory.
+
+  USAGI IPsec for IPv6 support is not stable and developers only.
+  If unsure, say 'N'.
+
+  NOTICE!:
+       USAGI IPsec(IPv6) stack and FreeS/WAN IPsec(IPv4) stack are
+       currently NOT compatible.
+
+  If you want to try to compile it, 
+  please read the usagi/doc/HOWTO/IPSEC.
+
+IP Security Support (IPsec for IPv6) apply to ICMPv6 packets
+CONFIG_APPLY_ICMPV6_IPSEC
+
+  You can say Y here if you want to apply IPsec to ICMPv6 packets.
+
+  NOTICE:
+  	currently we can't apply to NDISC packets(NA or RA receiving).
 
 TCP Explicit Congestion Notification support
 CONFIG_INET_ECN
@@ -4215,6 +4398,29 @@ CONFIG_FB_RIVA
   module will be called rivafb.o. If you want to compile it as a
   module, say M here and read <file:Documentation/modules.txt>.
 
+Intel 810 display support (EXPERIMENTAL)
+CONFIG_FB_I810
+  This driver supports the on-board graphics built-in to the Intel 810
+  chipset.  Say Y if you have and plan to use such a board.
+
+  The driver is also available as a module ( = code which can be
+  inserted and removed from the running kernel whenever you want). The
+  module will be called i810fb.o. If you want to compile it as a
+  module, say M here and read Documentation/modules.txt.
+
+  For more information, please read Documentation/fb/intel810.txt
+
+Intel 810 nonstandard video timings (EXPERIMENTAL)
+CONFIG_FB_I810_NONSTD
+  Enabling this option will allow the use of a range of horizontal
+  resolutions (640 to 1600) and vertical refresh rates (limited by
+  hardware) instead of being fixed to a limited set of timings.  For
+  those with less-than-capbable monitors, you'll be able to maximize
+  the display area and still get a comfortable refresh rate.
+
+  The timings will not be compliant with Intel's recommended values.
+  Use at your own risk.
+
 ATI Mach64 display support
 CONFIG_FB_ATY
   This driver supports graphics boards with the ATI Mach64 chips.
@@ -4281,16 +4487,10 @@ CONFIG_ARCH_ANAKIN
         * An audio card ( 4 * 40W, AC97 Codec, I2S)
 
 Altera Excalibur XA10 Dev Board
-CONFIG_ARCH_CAMELOT
-  This enables support for Altera's Excalibur XA10 & XA1 development boards.
+ARCH_CAMELOT
+  This enables support for Altera's Excalibur XA10 development board.
   If you would like to build your kernel to run on one of these boards
   then you must say 'Y' here. Otherwise say 'N'
-
-Altera Excalibur PLD hotswap support
-CONFIG_PLD_HOTSWAP
-  This enables support for the dynamic loading and configuration of
-  compatible drivers when the contents of the PLD are changed. You 
-  must enable the kernel module loader for this feature to work.
 
 Link-Up Systems LCD support
 CONFIG_FB_L7200
@@ -4748,6 +4948,69 @@ CONFIG_FB_VIRTUAL
   say M here and read <file:Documentation/modules.txt>.
 
   If unsure, say N.
+
+Intel 810/815 display support (EXPERIMENTAL)
+CONFIG_FB_I810
+  This driver supports the on-board graphics built-in to the Intel 810 
+  and 815 chipsets.  Say Y if you have and plan to use such a board.
+
+  The driver is also available as a module ( = code which can be
+  inserted and removed from the running kernel whenever you want). 
+  The module will be called i810fb.o. If you want to compile it as a
+  module, say M here and read Documentation/modules.txt.
+
+  For more information, please read Documentation/fb/intel810.txt
+ 
+Intel 810/815 VESA Generalized Timing Formula  (EXPERIMENTAL)
+CONFIG_FB_I810_GTF
+  If you say Y, then the VESA standard, Generalized Timing  Formula, 
+  or GTF, will be used to calculate the required video timing
+  values per video mode.  Since the GTF allows nondiscrete timings 
+  (nondiscrete being a range of values as opposed to discrete being a
+  set of values), you'll be able to use a range of resolutions 
+  (640 to 1600), vertical refresh rates (limited only by hardware), 
+  and variable display aspect ratios. If you want to maximize the 
+  capability of your display, or if you have a display with 
+  nonstandard dimensions (aspect ratio != 4:3), then select this 
+  option. The timings may not be compliant with Intel's recommended 
+  values. Use at your own risk.
+
+  If you say N, the driver will revert to a set of timing values as
+  recommended by Intel in their documentation.
+  
+  If unsure, say N.
+
+Intel 810/815 Hardware Acceleration Code (EXPERIMENTAL)
+CONFIG_FB_I810_ACCEL
+  To enable accelerated console drawing functions, enable this option, 
+  then pass the "accel" boot option or "accel=1" module option.  You 
+  will also need to select this option if you need console display 
+  rotation. Selecting this option will add 2 KB to your kernel.
+
+  If unsure, say N.
+
+Intel 810/815 Console Display Rotation Code (EXPERIMENTAL)
+CONFIG_FB_I810_ROTATE
+  If you select this option, you'll be able to rotate the console 
+  display 90 degrees to the left or to the right, or 180 degrees. You'll 
+  have to pass the "rotate=" boot parameter/module option to select the 
+  axis of rotation. Please read /usr/src/linux/Documentation/fb/intel810.txt 
+  for more information. Selecting this option will add 4 KB to your kernel.
+
+  If unsure, say N.
+
+Intel 810/815 Hardware Interface (VERY EXPERIMENTAL!)
+CONFIG_FB_I810_IFACE
+  If you select this option, a user-to-kernel interface will be included 
+  with the driver. Through this interface, userland programs can pass 
+  instructions to the driver and access the hardware's "accelerated" 
+  functions.  This is a very likely security risk, so unless you need this 
+  feature, do NOT select this option. Selecting this option will add 2 KB 
+  to your kernel.
+
+  This interface is necessary if you want to try the Directfb 
+  (http://www.direcfb.org) gfxdriver for the Intel 810.  The driver is 
+  available at http://www.sourceforge.net/projects/i810fb.
 
 Mach64 CT/VT/GT/LT (incl. 3D RAGE) support
 CONFIG_FB_ATY_CT
@@ -5265,6 +5528,12 @@ CONFIG_NET_IPIP
   be inserted in and removed from the running kernel whenever you
   want). Most people won't need this and can say N.
 
+IPv6 over IPv4 tunneling support (replaces sitXX devices)
+CONFIG_NET_IPIP_IPV6
+  If you say Y here, you can transport IPv6 packet over the tunlXX 
+  devices;  The sitXX devices will be dissappeared with this option.
+  Note: tunnel manipulation commands such as iptunnel should be updated.
+
 GRE tunnels over IP
 CONFIG_NET_IPGRE
   Tunneling means encapsulating data of one protocol type within
@@ -5313,6 +5582,12 @@ CONFIG_IP_PIMSM_V2
   gated-5). This routing protocol is not used widely, so say N unless
   you want to play with it.
 
+Moderate SO_REUSEADDR behavior
+CONFIG_NET_MODERATE_REUSE
+  With this option, kernel restrict effect of SO_REUSEADDR to prevent 
+  other users from performing 'binding closer' type attacks like NFS 
+  theft.  Say Y.
+
 Unix domain sockets
 CONFIG_UNIX
   If you say Y here, you will include support for Unix domain sockets;
@@ -5356,7 +5631,12 @@ CONFIG_IPV6
   want). The module will be called ipv6.o. If you want to compile it
   as a module, say M here and read <file:Documentation/modules.txt>.
 
-  It is safe to say N here for now.
+  Say Y. :-)
+
+IPv6: Verbose debugging messages
+CONFIG_IPV6_DEBUG
+  Verbose kernel message for debugging IPv6 stack.
+  If unsure, it is safe to say N.
 
 # 2.5 tree only
 IPv6: routing messages via old netlink
@@ -5365,6 +5645,162 @@ CONFIG_IPV6_NETLINK
   through the old netlink interface. However, a better option is to
   say Y to "Kernel/User network link driver" and to "Routing
   messages" instead.
+
+IPv6: inter-module support.
+CONFIG_IPV6_IM
+  Export some interface via the inter-module feature.
+  This is needed if you want to use generic tunnel (CONFIG_NET_IPGRE)
+  with modulized ipv6.  Say Y in such case, otherwise say N.
+
+IPv6: enable gre tunnel support with modulized ipv6
+CONFIG_IPV6_MODULE_IP_GRE
+  Use generic tunnel support with modulized ipv6 via
+  inter-module interface.
+ 
+IPv6: drop pakcets with fake ipv4-mapped address(es)
+CONFIG_IPV6_DROP_FAKE_V4MAPPED
+  Drop incoming packets with fake ipv4-mapped address(es) that
+  may cause security problems.  It is safe and recommended to 
+  say Y.
+
+IPv6: Anycast support
+  Anycast support for IPv6.  If unsure, say N.
+
+IPv6: Privacy Extensions (RFC 3041) support
+CONFIG_IPV6_PRIVACY
+  Privacy Extensions for Stateless Address Autoconfiguration in IPv6
+  support.  With this option, additional periodically-alter 
+  pseudo-random global-scope unicast address(es) will assigned to
+  your interface(s).
+
+  By default, kernel generates temporary addresses but it won't use 
+  them unless application explicitly bind them.  To prefer temporary 
+  address, do
+
+    echo 2 >/proc/sys/net/ipv6/conf/all/use_tempaddr 
+
+IPv6: Loose scope_id
+CONFIG_IPV6_LOOSE_SCOPE_ID
+  It is recommended to say N.
+  NOTE: This option is disabled by default.
+
+IPv6: Moderate double binding behavior
+CONFIG_IPV6_MODERATE_DOUBLE_BIND
+  With this option, kernel will not allow other users to do double 
+  binding.  Say Y.
+
+IPv6: IPv6 over IPv6 Tunneling (EXPERIMENTAL)
+CONFIG_IPV6_IPV6_TUNNEL
+
+  Experimental IP6-IP6 tunneling.  You must select this, if you want
+  to use CONFIG_IPV6_MOBILITY.  More information in MIPL Mobile IPv6
+  instructions.
+
+  If you don't want IP6-IP6 tunnels and Mobile IPv6, say N.
+
+IPv6: Mobility Support (EXPERIMENTAL)
+CONFIG_IPV6_MOBILITY
+  This is experimental support for the upcoming specification of
+  Mobile IPv6. Mobile IPv6 allows nodes to seamlessly move between
+  networks without changing their IP addresses, thus allowing them
+  to maintain upper layer connections (e.g. TCP).
+
+  Currently Mobile IPv6 support is available only as a module.
+
+  For more information and configuration details, see
+  <http://www.mipl.mediapoli.com/>.
+
+  If unsure, say N.
+
+MIPv6: AH Support
+CONFIG_IPV6_MOBILITY_AH
+  Mobile IPv6 draft revision 13 requires IPSec Authentication Header
+  support. MIPL Mobile IPv6 provides limited AH support. Say Y to
+  authenticate signaling messages with AH. MIPv6 nodes with AH support
+  cannot interoperate with MIPv6 nodes without it.
+
+  AH requirement was removed in a later draft revision. You might want
+  to use draft 15 mandated Authentication Data Sub-Option instead. If
+  so, you should probably say N here.
+
+  If unsure, say N.
+
+MIPv6: Debug messages
+CONFIG_IPV6_MOBILITY_DEBUG
+  MIPL Mobile IPv6 can produce a lot of debugging messages. There are
+  eight debug levels (0 through 7) and the level is controlled via
+  /proc/sys/net/ipv6/mobility/debuglevel. Since MIPL is still
+  experimental, you might want to say Y here.
+  
+  Be sure to say Y and record debug messages when submitting a bug 
+  report.
+
+IPv6: Prefix List support
+CONFIG_IPV6_PREFIXLIST
+  Added Prefix List described as a conceptual data structure in RFC2461.
+  Say N at this moment.
+
+IPv6: Neighbor Discovery debugging
+CONFIG_IPV6_NDISC_DEBUG
+  Verbose kernel message to debug Neighbor Discovery Protocol for 
+  IPv6.  Say N.
+
+IPv6: Stateless Address Autoconfiguration debugging
+CONFIG_IPV6_ACONF_DEBUG
+  Verbose kernel message to debug the IPv6 Stateless Address 
+  Autoconfiguration.  Say N.
+
+IPv6: Debug on source address selection
+CONFIG_IPV6_ACONF_DEBUG_SADDR
+  Verbose kernel message to debug IPv6 source address selection.
+  Say N.
+
+IPv6: ignore too small Valid Lifetime for Address Autoconfiguration
+CONFIG_IPV6_ACONF_MIN_VALID_LFT
+  Do not update valid-lifetime with small value to avoid particular 
+  DoS attack.  See RFC 2461 section 6.3.6 and RFC 2462 section 5.5.3.
+  Say Y.
+
+IPv6: Routing Information debugging
+CONFIG_IPV6_RT6_DEBUG
+  Verbose kernel message to debug IPv6 routing.  Say N.
+
+IPv6: allow default route when forwarding is enabled
+CONFIG_IPV6_EN_DFLT
+  When a Linux box is Configured as an IPv6 router, Linux kernel
+  recognizes IPv6 default routes as default routes of IPv6.  If 
+  you want to use a Linux box as an IPv6 router, Say Y.
+
+IPv6: Multicast Listener Discovery debugging
+CONFIG_IPV6_MLD6_DEBUG
+  Verbose kernel message to debug Multicast Listeners
+  Discovery for IPv6.  Say N.
+
+IPv6: Do not suppress MLD6 Done message
+CONFIG_IPV6_MLD6_NO_SUPPRESS_DONE
+  When a node ceases to listen to a multicast address on an
+  interface, it should send a single Done message.  If its recent
+  Report was suppressed by hearing another Report, it MAY send 
+  nothing.  You can turn off this optimization by 
+  CONFIG_IPV6_MLD6_NO_SUPPRESS_DONE.  See RFC 2710.
+  Say N.  
+
+IPv6: enable Node Information Queries
+CONFIG_IPV6_NODEINFO
+  Support ICMPv6 Node Information Queries defined in 
+  draft-ietf-ipngwg-icmp-name-lookups-07.txt.
+
+IPv6: regard NIS domain as DNS domain
+CONFIG_IPV6_NODEINFO_USE_UTS_DOMAIN
+  When the NI DNS Query requests FQDN of your Linux box, it will 
+  try to add the (NIS) domain to your hostname.  Generally, this is 
+  not a good idea, so say N; your box will reply as FQDN if its
+  hostname includes two or more dots, otherwise it will reply
+  as hostname.
+
+IPv6: ICMPv6 NI debug message (very verbose)
+CONFIG_IPV6_NODEINFO_DEBUG
+  Very verbose debug message.  Say N.
 
 Kernel httpd acceleration
 CONFIG_KHTTPD
@@ -5384,6 +5820,10 @@ CONFIG_KHTTPD
 
   The kHTTPd is experimental. Be careful when using it on a production
   machine. Also note that kHTTPd doesn't support virtual servers yet.
+
+Use IPv6 socket for khttpd
+CONFIG_KHTTPD_IPV6
+  Use IPv6 socket for khttpd module.
 
 The IPX protocol
 CONFIG_IPX
@@ -6184,6 +6624,12 @@ CONFIG_ATM_CLIP_NO_ICMP
   ATMARP table. This may cause problems when ATMARP table entries are
   briefly removed during revalidation. If you say Y here, packets to
   such neighbours are silently discarded instead.
+
+IPv6 Enhance for ATM (EXPERIMENTAL)
+CONFIG_ATM_IPV6
+  IPv6 support on a PVC link. To install and for usage, please refer
+  usagi/doc/HOWTO/ATM. If unsure, say N.
+
 
 LAN Emulation (LANE) support
 CONFIG_ATM_LANE
@@ -11648,10 +12094,6 @@ CONFIG_FDDI
   then also Y to the driver for your FDDI card, below). Most people
   will say N.
 
-Force CPCI735 LED support
-CONFIG_CPCI735_LED
-  This driver handles LED support for the Force CPCI735 card.
-
 Digital DEFEA and DEFPA adapter support
 CONFIG_DEFXX
   This is support for the DIGITAL series of EISA (DEFEA) and PCI
@@ -11747,30 +12189,6 @@ CONFIG_ARM_THUMB
   slightly less efficient code.
 
   If you don't know what this all is, saying Y is a safe choice.
-
-Workaround for XScale cache errata
-CONFIG_XSCALE_CACHE_ERRATA
-  There are couple errata that say that the cache may get confused
-  whether some cache lines are dirty or not, resulting in some memory
-  corruptions. The workaround (using the cache only in write through
-  mode) is performance impairing, and the bug _might_ just not be
-  that visible or critical to you depending on many esoteric
-  hardware factors.
-  
-  Not using the workaround makes Linux unreliable. If you're used
-  to some other OSes which requires to be rebooted once in a while
-  then this won't look so bad to you. On the other hand you may
-  stress test the system for hours without seeing any effect of this
-  bug.
-  
-  So this is configurable. Let's hope a future core revision will tell
-  this was just a bad dream. But in the mean time the risk and
-  trade-off is yours to decide.
-  
-  This should apply to all PXA250 up to rev B2 (erratum #120) and
-  possibly other current XScale cores as well.
-  
-  If you don't know what to answer, say Y.
 
 Support CD-ROM drives that are not SCSI or IDE/ATAPI
 CONFIG_CD_NO_IDESCSI
@@ -12042,6 +12460,20 @@ CONFIG_ISP16_CDI
   inserted in and removed from the running kernel whenever you want).
   The module will be called isp16.o. If you want to compile it as a
   module, say M here and read <file:Documentation/modules.txt>.
+
+Posix Access Control Lists
+CONFIG_FS_POSIX_ACL
+  Posix Access Control Lists (ACLs) support permissions for users and
+  groups beyond the owner/group/world scheme.
+
+  To learn more about Access Control Lists, visit the Posix ACLs for
+  Linux website <http://acl.bestbits.at/>.
+
+  If you plan to use Access Control Lists, you may also need the
+  getfacl and setfacl utilities, along with some additional patches
+  from the website.
+
+  If you don't know what Access Control Lists are, say N.
 
 iSeries Virtual I/O CD Support
 CONFIG_VIOCD
@@ -12728,12 +13160,6 @@ CONFIG_MTD_OCELOT
   This enables access routines for the boot flash device and for the
   NVRAM on the Momenco Ocelot board.  If you have one of these boards
   and would like access to either of these, say 'Y'.
-
-Flash chip mapping on epxa10db
-CONFIG_MTD_EPXA10DB
-  This enables support for the flash devices on the Altera
-  Excalibur XA10 Development Board. If you are building a kernel
-  for on of these boards then you should say 'Y' otherwise say 'N'.
 
 Support for absent chips in bus mapping
 CONFIG_MTD_ABSENT
@@ -14973,6 +15399,54 @@ UFS file system write support (DANGEROUS)
 CONFIG_UFS_FS_WRITE
   Say Y here if you want to try writing to UFS partitions. This is
   experimental, so you should back up your UFS partitions beforehand.
+
+SGI XFS file system support
+CONFIG_XFS_FS
+  XFS is a high performance journaling filesystem which originated
+  on the SGI IRIX platform.  It is completely multi-threaded, can
+  support large files and large filesystems, extended attributes,
+  variable block sizes, is extent based, and makes extensive use of
+  Btrees (directories, extents, free space) to aid both performance
+  and scalability.
+
+  Refer to the documentation at <http://oss.sgi.com/projects/xfs/>
+  for complete details.  This implementation is on-disk compatible
+  with the IRIX version of XFS.
+
+  If you want to compile this file system as a module ( = code which
+  can be inserted in and removed from the running kernel whenever you
+  want), say M here and read <file:Documentation/modules.txt>.  The
+  modules will be called xfs.o and xfs_support.o.  Be aware however
+  that if the file system of your root partition is compiled as a
+  module, you will need to use an initial ramdisk (initrd) to boot.
+
+Enable XFS DMAPI
+CONFIG_XFS_DMAPI
+  The Data Management API is a system interface used to implement
+  the interface defined in the X/Open document:
+    "Systems Management: Data Storage Management (XDSM) API",
+  dated February 1997.  This interface is used by hierarchical
+  storage management systems.
+
+  If unsure, say N.
+
+Enable XFS Quota
+CONFIG_XFS_QUOTA
+  If you say Y here, you will be able to set per user limits for disk
+  usage (also called disk quotas) under XFS.  XFS considers quota
+  information as filesystem metadata and uses journaling to provide
+  a higher level guarantee of consistency.  The on-disk quota file
+  format is also compatible with the IRIX version of XFS, allowing
+  filesystems to be migrated between Linux and IRIX without need for
+  any conversion.
+
+Enable XFS Realtime Subdevice
+CONFIG_XFS_RT
+  If you say Y here you will be able to mount and use XFS filesystems
+  which contain a realtime subvolume. The realtime subvolume is a
+  separate area of disk space where only file data is stored. The
+  realtime subvolume is designed to provide very deterministic
+  data rates suitable for media streaming applications.
 
 Advanced partition selection
 CONFIG_PARTITION_ADVANCED
@@ -17900,11 +18374,6 @@ CONFIG_SH_WDT
   The module is called shwdt.o. If you want to compile it as a module,
   say M here and read Documentation/modules.txt.
 	      
-Force CPCI735 Watchdog
-CONFIG_CPCI735_WATCHDOG
-  A watchdog timer for the Force CPCI735 board.  This will only work
-  on the specified board, only enable it if the target is that board.
-
 Toshiba Laptop support
 CONFIG_TOSHIBA
   This adds a driver to safely access the System Management Mode of
@@ -21094,10 +21563,6 @@ Walnut
 CONFIG_WALNUT
   Select Walnut if you have an IBM 405GP "Walnut" Evaluation Board.
 
-Xilinx-ML300
-CONFIG_XILINX_ML300
-  Select Xilinx-ML300 if you have a Xilinx ML300 evaluation board.
- 
 Workarounds for PPC601 bugs
 CONFIG_PPC601_SYNC_FIX
   Some versions of the PPC601 (the first PowerPC chip) have bugs which
@@ -22662,6 +23127,267 @@ CONFIG_PROCESS_DEBUG
   a debugging option; you probably do not want to set it unless you
   are an S390 port maintainer.
 
+Linux Security Modules (LSM) Support
+CONFIG_SECURITY
+  This enables the ability to have different security modules
+  in the kernel.  If this option is not selected, the default
+  capabilities functionality will be enabled.
+  If you are unsure how to answer this questions, answer N.
+
+Capabilities Support
+CONFIG_SECURITY_CAPABILITIES
+  This enables the "default" Linux capabilities functionality.
+  If you are unsure how to answer this question, answer Y.
+
+LSM port of Openwall
+CONFIG_SECURITY_OWLSM
+  This enables the LSM port of the Openwall kernel patch.  This is NOT
+  official Openwall.  For more information on the Openwall kernel patch
+  go to <http://www.openwall.com/>
+  
+Enforce RLIMIT_NPROC on execve(2)
+CONFIG_OWLSM_RLIMIT_NPROC
+  This option is an LSM port of the Openwall CONFIG_SECURE_RLIMIT_NPROC
+  patch. It is derived from Openwall but is not official Openwall.  This
+  option is only valid if you have chosen to build the LSM port of
+  Openwall (CONFIG_SECURITY_OWLSM).
+
+  Linux lets you set a limit on how many processes a user can have, via
+  a setrlimit(2) call with RLIMIT_NPROC. Unfortunately, this limit is
+  only looked at when a new process is created on fork(2). If a process
+  changes its UID, it might exceed the limit for its new UID. This is
+  not a security issue by itself, as changing the UID is a privileged
+  operation. However, there're privileged programs that want to switch
+  to a user's context, including setting up some resource limits. The
+  only fork(2) required (if at all) is done before switching the UID,
+  and thus doesn't result in a check against RLIMIT_NPROC. Enable this
+  option to enforce RLIMIT_NPROC on execve(2) calls.
+
+  If you are unsure how to answer this question, answer N.
+
+Restricted links in /tmp
+CONFIG_OWLSM_LINK
+  This option is an LSM port of the Openwall CONFIG_SECURE_LINK patch.
+  It is derived from Openwall but is not official Openwall.  This option
+  is only valid if you have chosen to build the LSM port of Openwall
+  (CONFIG_SECURITY_OWLSM).
+
+  There's a very common attack that involves a malicious user creating
+  a symbolic link in /tmp, with a carefully chosen name, pointing at
+  another user's file. When the victim then writes to that file name,
+  without the required precautions, they inadvertently write to the
+  wrong file. Enabling this option reduces the impact of this class of
+  holes (some get fixed, many others allow for DoS attacks only, most
+  of the rest become harder to exploit) by preventing a process from
+  following a link which is in a +t directory, unless the link owner
+  is trusted (that is, it's the user we're running as or the directory
+  owner). To prevent from using a hard link in an attack instead, this
+  option does not allow users to create hard links to files they don't
+  own. This might break things. Say Y if security is more important.
+
+Special handling of fd 0, 1, and 2
+CONFIG_OWLSM_FD
+  This option is an LSM port of the Openwall CONFIG_SECURE_FD_0_1_2
+  patch.  It is derived from Openwall but is not official Openwall.
+  This option is only valid if you have chosen to build the LSM port of
+  Openwall (CONFIG_SECURITY_OWLSM).
+
+  File descriptors 0, 1, and 2 have a special meaning for the C library
+  and lots of programs. Thus, they're often referenced by number. Still,
+  it is normally possible to execute a program with one or more of these
+  fd's closed, and any open(2) calls it might do will happily provide
+  these fd numbers. The program (or the libraries it is linked with)
+  will continue using the fd's for their usual purposes, in reality
+  accessing files the program has just opened. If such a program is
+  installed SUID and/or SGID, then we might have a security problem.
+  Enable this option to ensure that fd's 0, 1, and 2 are always open on
+  execution of a SUID/SGID binary.
+
+Intrusion Detection System support (EXPERIMENTAL)
+CONFIG_LIDS
+  LIDS - Linux Intrusion Detection System can let you protect your linux
+  kernel. 
+  
+  In order to use LIDS, you need to download the lidstools first from 
+  http://www.lids.org/
+   
+  Please read help provided with each option carefully. At the end of
+  each option we indicate what answer will increase security.
+  Be aware that security always has side effects, and some programs could
+  break.   
+
+  If you have any questions about LIDS, mail to the authors :
+                   Huagang Xie ( xie@www.lids.org)
+                   Philippe.biondi (philippe.biondi@webmotion.net)
+                   Steve Bremer (steve@clublinux.org)              
+
+  or visit lids home ,
+                http://www.lids.org/
+  
+  And you can get help from the LIDS Mailing list at
+                http://www.lids.org/maillist.html
+  and the FAQ by Steve Bremer at
+                http://www.clublinux.org/lids/
+
+  If your want to make LIDS as module, say "M" here , or if you want to build it into
+  the kernel, say "Y" here. otherwise, say "N".
+
+Hang up console when raising a security alert
+CONFIG_LIDS_SA_EXEC_UP
+  Saying yes will generate a security alert for each unprotected program 
+  that is executed before LIDS is sealed (with lidsadm -I).
+  This can help a lot to check whether your boot sequence is secured.
+  This can also warn you if a weakness has been exploited and an
+  unprotected program has been added to the boot process.
+
+  Saying yes increases security.
+
+Do not execute unprotected programs before sealing
+CONFIG_LIDS_NO_EXEC_UP
+  This option makes LIDS refuse the execution of the unprotected programs
+  before it is sealed. Be aware that you can prevent the system from 
+  booting with an incomplete lids.conf.
+
+  Saying yes increases security. 
+
+  Warning: Selecting this may cause your system to fail to boot, you must 
+           create proper ACLs to protect all the programs running before 
+           sealing. So, if you got problem with booting, disable this option, 
+           recompile and boot again.
+
+Logging behaviour
+CONFIG_LIDS_NO_FLOOD_LOG
+  If you say Yes here, LIDS will try not to flood logs with the
+  same message repeated a lot of times.
+
+  Saying yes will increase security.
+
+Time between two logs
+CONFIG_LIDS_TIMEOUT_AFTER_FLOOD
+  This is the minimum time (in seconds) allowed between two different
+  security alerts. When a security alert occurs, no more alerts will be
+  logged before expiration of this timeout. (Except the first alert, with
+  a flood warning).
+
+Allow switching normal/security mode
+CONFIG_LIDS_ALLOW_SWITCH
+  If you say Yes here, you will enable the possibility to switch
+  LIDS on and off.
+
+  Note: You must set a password with 'lidsconf -P'
+  
+  Saying no increases security.
+
+Restrict mode switching to specified terminal types
+CONFIG_LIDS_RESTRICT_MODE_SWITCH
+  If you enable this option, mode switching will be only allowed
+  from specified terminal types.
+
+Allow mode switching from Linux Console
+CONFIG_LIDS_MODE_SWITCH_CONSOLE
+  Allow mode switching from a Linux Console.
+
+Allow mode switching from serial Console
+CONFIG_LIDS_MODE_SWITCH_SERIAL
+  Allow mode switching from a serial Console.
+
+Allow mode switching from a PTY
+CONFIG_LIDS_MODE_SWITCH_PTY
+  Allow mode switching from a PTY. 
+
+Number of attempts to submit password
+CONFIG_LIDS_MAX_TRY
+  Here you put the number of tries you will allow before disabling the
+  switch capability for a while.
+
+  The lower it is, the more secure the system will be.
+
+Time to wait after a fail
+CONFIG_LIDS_TTW_FAIL
+  Here you put the time (in seconds) the switch capability will be
+  disabled when the authorised number of fails is reached.
+
+  The higher it is, the more secure the system will be.
+
+Allow any program to switch LIDS on/off
+CONFIG_LIDS_ALLOW_ANY_PROG_SWITCH
+  If you say Yes here, you will allow programs others than
+  /sbin/lidsadm to feed /proc/sys/lids/locks.
+  
+  Notes : * It is strongly recommended to leave this option
+            unmarked ! Don't say yes !
+          * I don't know what it could be useful for :)
+
+  Say no.
+
+Allow reloading config file when switched off
+CONFIG_LIDS_RELOAD_CONF
+  Saying Yes here will compile the necessary code to reload the config
+  file. Each time you pass +RELOAD_CONF argument to lidsadm, LIDS reloads 
+  /etc/lids.conf and re-reads dev/inode numbers of special programs
+  (/sbin/lidsadm and every program you allow to do something LIDS
+  forbids)
+
+  If an error occurs during the reload phase, the kernel does not panic
+  as it does at startup, because it considers you see the error 
+  immediately and correct it.
+
+Send security alerts through network
+CONFIG_LIDS_SA_THROUGH_NET
+  Say yes here if you want to send LIDS security alerts to
+  a remote machine through the network, directly from the 
+  kernel, without the help of any potentially corrupted
+  user space program (especially mailer programs)
+  You can send them via mail or via UDP datagrams to a 
+  remote syslog, http POST, or anything else you can imagine.
+
+  A pseudo scripting language a la expect is provided to
+  use some communication protocols (as the mail one).
+
+  Below is a summary of the important parameters for the
+  connection. See their respective help section for more
+  help.
+
+  You must provide
+     - the IP of the remote machine
+     - the TCP/UDP port for the connection
+
+  If you choose to use the provided mailer script
+     - Name of the source machine
+     - Name of the sender
+     - Mail address of the receiver
+     - Subject of the mail
+
+  If you choose to use your own script 
+  (or the remote syslog one, provided) :
+     - Socket type (TCP/UDP)
+     - Path of the script
+     
+Number of connection tries before giving up
+CONFIG_LIDS_NET_MAX_TRIES
+  How many times klids will try to send the security alert, if
+  it can't connect (you forgot a firewall ? :) ), or if there 
+  is a protocol error (remote sendmail doesn't accept your mail ?).
+  After this number of tries, the message is deleted, even
+  if it was not send (we can imagine that, for some unknown 
+  reason (protocol error, defectious IP stack on the road,..)
+  the message can't be send and block the remaining of the
+  queue). 
+  
+  If you don't want to loose any messages, put a big number
+  of tries here, and give a reasonnable sleep period.
+  
+Sleep time after a failed connection
+CONFIG_LIDS_NET_TIMEOUT
+  When klids fails to send the security alert, how many seconds
+  will it sleep before retrying ?
+
+Message queue size
+CONFIG_LIDS_MSGQUEUE_SIZE
+  The security alerts are stored in a message queue. Give 
+  the number of messages that could be queued before loosing
+  new messages here.
+
 #
 # ARM options
 #
@@ -22741,15 +23467,6 @@ CONFIG_IQ80310_TURBO_CHARGE
   might cause.  Having said that, this should not cause any 
   hardware failures as many people have been running their IQ80310
   boards at that speed for months.
-
-IXP425 SDRAM Size
-CONFIG_IXP425_SDRAM_SIZE
-  The IXP425 only has a 64MB inbound PCI window into SDRAM. If you
-  set the memory size to > 64MB, the kernel will bounce all buffers
-  that are not within the first 64MB so that PCI devices can access
-  them.  Note that while this will allow you to use more RAM, PCI
-  performance will be degraded due to the extra copies during 
-  each transaction.
 
 LinkUp Systems L7200 SDB
 CONFIG_ARCH_L7200
@@ -23077,26 +23794,6 @@ CONFIG_EP72XX_ROM_BOOT
   support booting in this mode.
 
   You almost surely want to say N here.
-
-
-Kernel VM Split
-CONFIG_VM_SPLIT
-
-   By default, Linux splits the 32-bit address space into 1G for
-   the kernel starting at 0xc0000000, and the lower 3G for user
-   space applications. This works fine on most system; however,
-   higher-end systems with lots of on board I/O devices that
-   need to be mapped in run out of VMALLOC space, so you need
-   to provide a larger area of the address space to the kernel.
-   If you choose 'yes' here, you will be able to choose the exact
-   VM split you want. The choices are:
-
-      3G User space/1G kernel (Default linux setup)
-      2g User space/2G kernel
-      1G User space/3G kernel
-
-   If you don't think you need to change this or don't fully understand
-   what it means, it's best to leave this at 'no'
 
 Math emulation
 CONFIG_FPE_NWFPE
@@ -24707,40 +25404,6 @@ CONFIG_PPC405_I2C_ADAP
 BM PPC 405 Watchdog Timer
 CONFIG_PPC405_WDT
   Enable this option to use the built-in watch dog timer on your 405.
-
-Xilinx Virtex-II Pro on-chip ethernet
-CONFIG_XILINX_ENET
-  If you want to use the Xilinx built-in ethernet select this.
-
-Xilinx Virtex-II Pro TFT display frame buffer
-CONFIG_FB_XILINX
-  If you want to use the Xilinx built-in TFT display select this.
-
-Xilinx Virtex-II Pro I2C
-CONFIG_I2C_XILINX
-  If you want to use the Xilinx built-in I2C select this.
-
-Xilinx Virtex-II Pro GPIO
-CONFIG_XILINX_GPIO
-  If you want to use the Xilinx built-in GPIO select this.
-
-Xilinx Virtex-II Pro System ACE
-CONFIG_XILINX_SYSACE
-  Xilinx has a piece of hardware called the System ACE.  It interfaces
-  the processor, the JTAG chain and a CompactFlash.  When the system
-  is reset, System ACE reads a file from the CompactFlash that is used
-  to initialize the system via the JTAG interface.  After the system is
-  up, the System ACE can be used to give the processor access to the
-  CompactFlash and JTAG chain.  If you want Linux to use the
-  CompactFlash as a block device, select this.
-
-Xilinx MAC Address
-CONFIG_XILINX_ML300_MACADDR
-  How the MAC address is going to be stored on the Xilinx ML300
-  evaluation board has not yet been defined.  This temporary
-  configuration variable will let you choose the MAC address to
-  use.  Note that you will have to use different kernels if you
-  want to have multiple boards on the same network.
 
 Kernel support for IA-32 emulation
 CONFIG_IA32_SUPPORT

@@ -1,4 +1,3 @@
-
 /*
  * Flash memory access on EPXA based devices
  *
@@ -6,7 +5,7 @@
  *  Copyright (C) 2001 Altera Corporation
  *  Copyright (C) 2001 Red Hat, Inc.
  *
- * $Id: epxa10db-flash.c,v 1.2 2001/12/19 13:00:19 jskov Exp $ 
+ * $Id: epxa10db-flash.c,v 1.4 2002/08/22 10:46:19 cdavies Exp $ 
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -33,6 +32,11 @@
 #include <linux/mtd/partitions.h>
 
 #include <asm/hardware.h>
+#ifdef CONFIG_EPXA10DB
+#define BOARD_NAME "EPXA10DB"
+#else
+#define BOARD_NAME "EPXA1DB"
+#endif
 
 static int nr_parts = 0;
 static struct mtd_partition *parts;
@@ -59,7 +63,7 @@ static __u32 epxa_read32(struct map_info *map, unsigned long ofs)
 
 static void epxa_copy_from(struct map_info *map, void *to, unsigned long from, ssize_t len)
 {
-	memcpy_fromio(to, (unsigned long)(map->map_priv_1 + from), len);
+	memcpy_fromio(to, (void *)(map->map_priv_1 + from), len);
 }
 
 static void epxa_write8(struct map_info *map, __u8 d, unsigned long adr)
@@ -82,7 +86,7 @@ static void epxa_write32(struct map_info *map, __u32 d, unsigned long adr)
 
 static void epxa_copy_to(struct map_info *map, unsigned long to, const void *from, ssize_t len)
 {
-	memcpy_toio((unsigned long)(map->map_priv_1 + to), from, len);
+	memcpy_toio((void *)(map->map_priv_1 + to), from, len);
 }
 
 
@@ -105,7 +109,6 @@ static struct map_info epxa_map = {
 static int __init epxa_mtd_init(void)
 {
 	int i;
-	struct mtd_partition prot_part;
 	
 	printk(KERN_NOTICE "%s flash device: %x at %x\n", BOARD_NAME, FLASH_SIZE, FLASH_START);
 	epxa_map.map_priv_1 = (unsigned long)ioremap(FLASH_START, FLASH_SIZE);
@@ -122,8 +125,8 @@ static int __init epxa_mtd_init(void)
 
 	mymtd->module = THIS_MODULE;
 
+	/* Unlock the flash device. */
 	if(mymtd->unlock){
-		/* Unlock the flash device. */
 		for (i=0; i<mymtd->numeraseregions;i++){
 			int j;
 			for(j=0;j<mymtd->eraseregions[i].numblocks;j++){
@@ -131,18 +134,6 @@ static int __init epxa_mtd_init(void)
 			}
 		}
 	}
-
-	/* 
-	 * Add a partition to allow us to access the protection 
-	 * data in the flash attached to EBI0
-	 */
-	/*
-        memzero(&prot_part,sizeof(struct mtd_partition));
-	prot_part.name="epxa";
-	prot_part.size=BOOT_PART_SIZE;
-	prot_part.offset=0x00100000;
-	add_mtd_partitions(mymtd, &prot_part, 1);
-	*/
 
 #ifdef CONFIG_MTD_REDBOOT_PARTS
 	nr_parts = parse_redboot_partitions(mymtd, &parts);
@@ -194,8 +185,8 @@ static void __exit epxa_mtd_cleanup(void)
  * going to use then we'll remove this function and do it properly
  *
  * Partions are currently (as offsets from base of flash):
- * mtd0 - bootloader (!)
- * mtd1 - Flashdisk
+ * 0x00000000 - 0x003FFFFF - bootloader (!)
+ * 0x00400000 - 0x00FFFFFF - Flashdisk
  */
 
 static int __init epxa_default_partitions(struct mtd_info *master, struct mtd_partition **pparts)
@@ -220,8 +211,13 @@ static int __init epxa_default_partitions(struct mtd_info *master, struct mtd_pa
 	names += strlen(name) + 1;
 	strcpy(parts[i].name, name);
 
-        parts[i].size   = FLASH_SIZE-BOOT_PART_SIZE;
-        parts[i].offset = BOOT_PART_SIZE;
+#ifdef CONFIG_EPXA10DB
+	parts[i].size = FLASH_SIZE-0x00400000;
+	parts[i].offset = 0x00400000;
+#else
+	parts[i].size = FLASH_SIZE-0x00180000;
+	parts[i].offset = 0x00180000;
+#endif
 
  out:
 	*pparts = parts;

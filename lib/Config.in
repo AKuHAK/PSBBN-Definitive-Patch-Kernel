@@ -6,12 +6,11 @@
 # need to be made here about how to include library elements.
 #
 
-if [ "$CONFIG_JFFS2_FS" = "y" -o \
-	"$CONFIG_PPP_DEFLATE" = "y" ]; then
+if [ "$CONFIG_PPP_DEFLATE" = "y" -o \
+	"$CONFIG_FBCON_WALLPAPER" = "y" ]; then
    define_tristate CONFIG_ZLIB y
 else
-   if [ "$CONFIG_JFFS2_FS" = "m" -o \
-   	"$CONFIG_PPP_DEFLATE" = "m" ]; then
+   if [ "$CONFIG_PPP_DEFLATE" = "m" ]; then
       define_tristate CONFIG_ZLIB m
    fi
 fi

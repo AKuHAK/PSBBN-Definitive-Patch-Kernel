@@ -140,11 +140,12 @@ export SVGA_MODE = -DSVGA_MODE=NORMAL_VGA
 
 #export RAMDISK = -DRAMDISK=512
 
-CORE_FILES	=kernel/kernel.o mm/mm.o fs/fs.o ipc/ipc.o
+CORE_FILES	=kernel/kernel.o mm/mm.o fs/fs.o ipc/ipc.o security/vmlinux-obj.o
 NETWORKS	=net/network.o
+CRYPTO		=crypto/crypto.o
 
 LIBS		=$(TOPDIR)/lib/lib.a
-SUBDIRS		=kernel drivers mm fs net ipc lib
+SUBDIRS		=kernel drivers mm fs net ipc lib crypto security
 
 DRIVERS-n :=
 DRIVERS-y :=
@@ -176,7 +177,7 @@ DRIVERS-$(CONFIG_SCSI) += drivers/scsi/scsidrv.o
 DRIVERS-$(CONFIG_FUSION_BOOT) += drivers/message/fusion/fusion.o
 DRIVERS-$(CONFIG_IEEE1394) += drivers/ieee1394/ieee1394drv.o
 
-ifneq ($(CONFIG_CD_NO_IDESCSI)$(CONFIG_BLK_DEV_IDECD)$(CONFIG_BLK_DEV_SR)$(CONFIG_PARIDE_PCD),)
+ifneq ($(CONFIG_CD_NO_IDESCSI)$(CONFIG_BLK_DEV_IDECD)$(CONFIG_BLK_DEV_SR)$(CONFIG_PARIDE_PCD)$(CONFIG_PS2_CDVD),)
 DRIVERS-y += drivers/cdrom/driver.o
 endif
 
@@ -213,7 +214,7 @@ DRIVERS-$(CONFIG_MAPLE) += drivers/maple/maplebus.o
 DRIVERS-$(CONFIG_TRACE) += drivers/trace/trace_driver.o
 DRIVERS-$(CONFIG_VMEBUS) += drivers/vme/vme.o
 DRIVERS-$(CONFIG_SENSORS) += drivers/sensors/sensor.o
-DRIVERS-$(CONFIG_PLD) += drivers/pld/pld.o
+DRIVERS-$(CONFIG_PS2) += drivers/ps2/ps2.o
 
 DRIVERS := $(DRIVERS-y)
 
@@ -274,7 +275,7 @@ include arch/$(ARCH)/Makefile
 
 export	CPPFLAGS CFLAGS AFLAGS
 
-export	NETWORKS DRIVERS LIBS HEAD LDFLAGS LINKFLAGS MAKEBOOT ASFLAGS
+export	NETWORKS CRYPTO DRIVERS LIBS HEAD LDFLAGS LINKFLAGS MAKEBOOT ASFLAGS
 
 .S.s:
 	$(CPP) $(AFLAGS) -traditional -o $*.s $<
@@ -287,16 +288,49 @@ Version: dummy
 boot: vmlinux
 	@$(MAKE) CFLAGS="$(CFLAGS) $(CFLAGS_KERNEL)" -C arch/$(ARCH)/boot
 
+#
+# for statically linking NSC wallpaper
+#
+ifeq ($(CONFIG_WALLPAPER_STATIC),y)
+DUMMY_WP := drivers/video/snsc_wpdata/dummy_wp.o
+
+$(DUMMY_WP): dummy
+	$(MAKE) CFLAGS="$(CFLAGS) $(CFLAGS_KERNEL)" -C drivers/video/snsc_wpdata dummy_wp.o
+
+vmlinux.o: include/linux/version.h $(CONFIGURATION) init/main.o init/version.o linuxsubdirs
+	$(LD) -r $(HEAD) init/main.o init/version.o \
+		--start-group \
+		$(CORE_FILES) \
+		$(DRIVERS) \
+		$(NETWORKS) \
+		$(CRYPTO) \
+		$(LIBS) \
+		--end-group \
+		-o vmlinux.o
+
+vmlinux: $(DUMMY_WP) vmlinux.o
+	$(LD) $(LINKFLAGS) vmlinux.o $(DUMMY_WP) -o vmlinux
+	$(NM) vmlinux | grep -v '\(compiled\)\|\(\.o$$\)\|\( [aUw] \)\|\(\.\.ng$$\)\|\(LASH[RL]DI\)' | sort > System.map
+
+exportwp: dummy
+	$(MAKE) -C drivers/video/snsc_wpdata exportwp
+
+cleanwp: dummy
+	$(MAKE) -C drivers/video/snsc_wpdata cleanwp
+
+else
 vmlinux: include/linux/version.h $(CONFIGURATION) init/main.o init/version.o linuxsubdirs
 	$(LD) $(LINKFLAGS) $(HEAD) init/main.o init/version.o \
 		--start-group \
 		$(CORE_FILES) \
 		$(DRIVERS) \
 		$(NETWORKS) \
+		$(CRYPTO) \
 		$(LIBS) \
 		--end-group \
 		-o vmlinux
 	$(NM) vmlinux | grep -v '\(compiled\)\|\(\.o$$\)\|\( [aUw] \)\|\(\.\.ng$$\)\|\(LASH[RL]DI\)' | sort > System.map
+endif
 
 symlinks:
 	rm -f include/asm
@@ -472,6 +506,7 @@ distclean: mrproper
 		\( -name '*.orig' -o -name '*.rej' -o -name '*~' \
 		-o -name '*.bak' -o -name '#*#' -o -name '.*.orig' \
 		-o -name '.*.rej' -o -name '.SUMS' -o -size 0 \) -type f -print` TAGS tags cscope.*
+	find . -name '.#*' -type f -print | xargs rm -f
 
 backup: mrproper
 	cd .. && tar cf - linux/ | gzip -9 > backup.gz

@@ -13,6 +13,9 @@ if [ "$CONFIG_I2C_PROC" = "m" -o "$CONFIG_I2C_PROC" = "y" ] ; then
   
   if [ "$CONFIG_SENSORS" != "n" ]; then
     dep_tristate '  Analog Devices ADM1021 and compatibles' CONFIG_SENSORS_ADM1021 $CONFIG_I2C $CONFIG_I2C_PROC
+    if [ "$CONFIG_SENSORS_ADM1021" = "m" -o "$CONFIG_SENSORS_ADM1021" = "y" ]; then
+      dep_mbool '    National Semiconductors LM90 support as ADM1023' CONFIG_SENSORS_ADM1021_SUPPORT_LM90 $CONFIG_I2C $CONFIG_I2C_PROC $CONFIG_SENSORS_ADM1021
+    fi
     dep_tristate '  Analog Devices ADM1024' CONFIG_SENSORS_ADM1024 $CONFIG_I2C $CONFIG_I2C_PROC
     dep_tristate '  Analog Devices ADM1025' CONFIG_SENSORS_ADM1025 $CONFIG_I2C $CONFIG_I2C_PROC
     dep_tristate '  Analog Devices ADM9240 and compatibles' CONFIG_SENSORS_ADM9240 $CONFIG_I2C $CONFIG_I2C_PROC
@@ -37,6 +40,7 @@ if [ "$CONFIG_I2C_PROC" = "m" -o "$CONFIG_I2C_PROC" = "y" ] ; then
       dep_tristate '  DDC Monitor EDID EEPROM' CONFIG_SENSORS_DDCMON $CONFIG_I2C $CONFIG_I2C_PROC
       dep_tristate '  EEprom (DIMM) reader ' CONFIG_SENSORS_EEPROM $CONFIG_I2C $CONFIG_I2C_PROC
       dep_tristate '  Matrix-Orbital LCD Displays' CONFIG_SENSORS_MATORB $CONFIG_I2C $CONFIG_I2C_PROC
+      dep_tristate '  PCF8591T 8-bit A/D and D/A converter' CONFIG_SENSORS_PCF8591T $CONFIG_I2C $CONFIG_I2C_PROC
       if [ "$CONFIG_SA1100_PFS168" = "y" ]; then
          dep_tristate '  PFS-168 I2C X9221 dual digi-pot' CONFIG_SENSORS_X9221 $CONFIG_I2C $CONFIG_I2C_PROC
       fi

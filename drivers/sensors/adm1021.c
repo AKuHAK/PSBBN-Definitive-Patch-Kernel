@@ -18,6 +18,9 @@
     along with this program; if not, write to the Free Software
     Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
+/*
+ *  2002/05/23 Modified for MPU-301 by Sony Corporation.
+ */
 
 #include <linux/version.h>
 #include <linux/module.h>
@@ -93,6 +96,9 @@ SENSORS_INSMOD_7(adm1021, adm1023, max1617, max1617a, thmc10, lm84, gl523sm);
 /* Conversions  note: 1021 uses normal integer signed-byte format*/
 #define TEMP_FROM_REG(val) (val > 127 ? val-256 : val)
 #define TEMP_TO_REG(val)   (SENSORS_LIMIT((val < 0 ? val+256 : val),0,255))
+#ifdef CONFIG_SENSORS_ADM1021_SUPPORT_LM90
+#define PREC_TO_REG(val)   ((val & 0x7) << 5)
+#endif /* CONFIG_SENSORS_ADM1021_SUPPORT_LM90 */
 
 /* Initial values */
 
@@ -104,6 +110,16 @@ clearing it.  Weird, ey?   --Phil  */
 #define adm1021_INIT_THYST 20
 #define adm1021_INIT_REMOTE_TOS 60
 #define adm1021_INIT_REMOTE_THYST 20
+
+#ifdef CONFIG_SENSORS_ADM1021_SUPPORT_LM90
+/* Initial values of adm1023/LM90-specific registers.
+   Note that these precision register's LSB represent 0.125 degrees C.
+ (e.g. setting adm1021_INIT_REMOTE_TOS_PREC to '3' means '0.375 degrees C.') */
+#define adm1021_INIT_REMOTE_TOS_PREC 0
+#define adm1021_INIT_REMOTE_THYST_PREC 0
+#define adm1021_INIT_REMOTE_OFFSET 0
+#define adm1021_INIT_REMOTE_OFFSET_PREC 0
+#endif /* CONFIG_SENSORS_ADM1021_SUPPORT_LM90 */
 
 /* Each client has this additional data */
 struct adm1021_data {
@@ -256,7 +272,15 @@ static int adm1021_detect(struct i2c_adapter *adapter, int address,
 		if (
 		    (adm1021_read_value(new_client, ADM1021_REG_STATUS) &
 		     0x03) != 0x00)
+#ifdef CONFIG_SENSORS_ADM1021_SUPPORT_LM90
+		  /* We don't know why check status now and goto error
+		     if LCRIT or RCRIT flag is set, so we just put warning
+		     message and continue chip detect. */
+			printk("adm1021: status flag LCRIT/RCRIT bit is set, %d!\n",
+				adm1021_read_value(new_client, ADM1021_REG_STATUS));
+#else
 			goto ERROR1;
+#endif /* CONFIG_SENSORS_ADM1021_SUPPORT_LM90 */
 	}
 
 	/* Determine the chip type. */
@@ -268,6 +292,12 @@ static int adm1021_detect(struct i2c_adapter *adapter, int address,
 			kind = adm1023;
 		  else
 			kind = adm1021;
+#ifdef CONFIG_SENSORS_ADM1021_SUPPORT_LM90
+		else if ((i = 0x01) &&
+			 (adm1021_read_value
+			  (new_client, ADM1021_REG_DEV_ID) == 0x21))
+			kind = adm1023;
+#endif /* CONFIG_SENSORS_ADM1021_SUPPORT_LM90 */
 		else if (i == 0x49)
 			kind = thmc10;
 		else if (i == 0x23)
@@ -366,6 +396,19 @@ void adm1021_init_client(struct i2c_client *client)
 			    TEMP_TO_REG(adm1021_INIT_REMOTE_TOS));
 	adm1021_write_value(client, ADM1021_REG_REMOTE_THYST_W,
 			    TEMP_TO_REG(adm1021_INIT_REMOTE_THYST));
+#ifdef CONFIG_SENSORS_ADM1021_SUPPORT_LM90
+	if (((struct adm1021_data *)client->data)->type == adm1023){
+	  /* Initialize adm1023/LM90-specific registers */
+	  adm1021_write_value(client, ADM1021_REG_REM_TOS_PREC, 
+			      PREC_TO_REG(adm1021_INIT_REMOTE_TOS_PREC));
+	  adm1021_write_value(client, ADM1021_REG_REM_THYST_PREC,
+			      PREC_TO_REG(adm1021_INIT_REMOTE_THYST_PREC));
+	  adm1021_write_value(client, ADM1021_REG_REM_OFFSET,
+			      TEMP_TO_REG(adm1021_INIT_REMOTE_OFFSET));
+	  adm1021_write_value(client, ADM1021_REG_REM_OFFSET_PREC,
+			      PREC_TO_REG(adm1021_INIT_REMOTE_OFFSET_PREC));
+	}
+#endif /* CONFIG_SENSORS_ADM1021_SUPPORT_LM90 */
 	/* Enable ADC and disable suspend mode */
 	adm1021_write_value(client, ADM1021_REG_CONFIG_W, 0);
 	/* Set Conversion rate to 1/sec (this can be tinkered with) */
@@ -448,8 +491,17 @@ void adm1021_update_client(struct i2c_client *client)
 		    adm1021_read_value(client, ADM1021_REG_REMOTE_TOS_R);
 		data->remote_temp_hyst =
 		    adm1021_read_value(client, ADM1021_REG_REMOTE_THYST_R);
+#ifdef CONFIG_SENSORS_ADM1021_SUPPORT_LM90
+/* It seems that the status mask 0xec is incorrect for adm102x chips,
+   but we correct this only if SUPPORT_LM90 flag is set.
+   We don't support T_CRIT, so we mask RCRIT/LCRIT flag of status register.
+   If you want to watch these flags, set the mask to 0x7f. */ 
+		data->alarms =
+		    adm1021_read_value(client, ADM1021_REG_STATUS) & 0x7c;
+#else
 		data->alarms =
 		    adm1021_read_value(client, ADM1021_REG_STATUS) & 0xec;
+#endif /* CONFIG_SENSORS_ADM1021_SUPPORT_LM90 */	
 		if (data->type == adm1021)
 			data->die_code =
 			    adm1021_read_value(client,
@@ -607,6 +659,9 @@ int __init sensors_adm1021_init(void)
 	int res;
 
 	printk("adm1021.o version %s (%s)\n", LM_VERSION, LM_DATE);
+#ifdef CONFIG_SENSORS_ADM1021_SUPPORT_LM90
+	printk("adm1021.o: supports LM90 as ADM1023 chip.\n");
+#endif /* CONFIG_SENSORS_ADM1021_SUPPORT_LM90 */
 	adm1021_initialized = 0;
 	if ((res = i2c_add_driver(&adm1021_driver))) {
 		printk

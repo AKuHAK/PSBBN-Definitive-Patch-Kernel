@@ -79,6 +79,9 @@
 #include <asm/uaccess.h>
 #include <asm/hardirq.h>
 #include <asm/it8172/it8172.h>
+#ifdef CONFIG_MIPS_SNSC_MPU210
+#include <asm/it8172/snsc_mpu210.h>
+#endif	/* CONFIG_MIPS_SNSC_MPU210 */
 
 /* --------------------------------------------------------------------- */
 
@@ -735,7 +738,8 @@ static int prog_dmabuf(struct it8172_state *s, struct dmabuf *db,
 #endif
 
 	// set data length register
-	outw(db->fragsize, s->io+reg+2);
+	//   The acual Transfer count will be this register vaule plus 1.
+	outw(db->fragsize - 1, s->io+reg+2);
 	db->ready = 1;
 
 	return 0;
@@ -1960,6 +1964,9 @@ static int __devinit it8172_probe(struct pci_dev *pcidev,
 	unsigned short pcisr, vol;
 	unsigned char legacy, imc;
 	char proc_str[80];
+#ifdef CONFIG_MIPS_SNSC_MPU210
+	unsigned short egpio11;
+#endif	/* CONFIG_MIPS_SNSC_MPU210 */
     
 	if (pcidev->irq == 0) 
 		return -1;
@@ -2063,8 +2070,21 @@ static int __devinit it8172_probe(struct pci_dev *pcidev,
 
 	/* cold reset the AC97 */
 	outw(CODECC_CR, s->io+IT_AC_CODECC);
+#ifdef CONFIG_MIPS_SNSC_MPU210
+	/*
+	 * RESET# of AC97 codec on IOC-8 is connected to /SRESET on MPU-210.
+	 */
+	IT_IO_READ16(MPU210_EGPIO1_1, egpio11);
+	egpio11 &= ~MPU210_AC97_SRESET;
+	IT_IO_WRITE16(MPU210_EGPIO1_1, egpio11);
+#endif	/* CONFIG_MIPS_SNSC_MPU210 */
 	it8172_delay(10);
 	outw(0, s->io+IT_AC_CODECC);
+#ifdef CONFIG_MIPS_SNSC_MPU210
+	IT_IO_READ16(MPU210_EGPIO1_1, egpio11);
+	egpio11 |= MPU210_AC97_SRESET;
+	IT_IO_WRITE16(MPU210_EGPIO1_1, egpio11);
+#endif	/* CONFIG_MIPS_SNSC_MPU210 */
 	/* need to delay around 500msec(bleech) to give
 	   some CODECs enough time to wakeup */
 	it8172_delay(500);

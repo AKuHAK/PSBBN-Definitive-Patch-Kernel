@@ -20,6 +20,7 @@
 #include <linux/swap.h>
 #include <linux/swapctl.h>
 #include <linux/timex.h>
+#include <linux/security.h>
 
 /* #define DEBUG */
 
@@ -89,7 +90,7 @@ static int badness(struct task_struct *p)
 	 * Superuser processes are usually more important, so we make it
 	 * less likely that we kill those.
 	 */
-	if (cap_t(p->cap_effective) & CAP_TO_MASK(CAP_SYS_ADMIN) ||
+	if (!security_capable(p,CAP_SYS_ADMIN) ||
 				p->uid == 0 || p->euid == 0)
 		points /= 4;
 
@@ -99,7 +100,7 @@ static int badness(struct task_struct *p)
 	 * tend to only have this flag set on applications they think
 	 * of as important.
 	 */
-	if (cap_t(p->cap_effective) & CAP_TO_MASK(CAP_SYS_RAWIO))
+	if (!security_capable(p,CAP_SYS_RAWIO))
 		points /= 4;
 #ifdef DEBUG
 	printk(KERN_DEBUG "OOMkill: task %d (%s) got %d points\n",
@@ -153,7 +154,7 @@ void oom_kill_task(struct task_struct *p)
 	p->flags |= PF_MEMALLOC | PF_MEMDIE;
 
 	/* This process has hardware access, be more careful. */
-	if (cap_t(p->cap_effective) & CAP_TO_MASK(CAP_SYS_RAWIO)) {
+	if (!security_capable(p,CAP_SYS_RAWIO)) {
 		force_sig(SIGTERM, p);
 	} else {
 		force_sig(SIGKILL, p);

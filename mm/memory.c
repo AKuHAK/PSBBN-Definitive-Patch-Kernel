@@ -44,6 +44,7 @@
 #include <linux/iobuf.h>
 #include <linux/highmem.h>
 #include <linux/pagemap.h>
+#include <linux/security.h>
 
 #include <linux/trace.h>
 

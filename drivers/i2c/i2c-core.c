@@ -1199,9 +1199,13 @@ static s32 i2c_smbus_xfer_emulated(struct i2c_adapter * adapter, u16 addr,
 		break;
 	case I2C_SMBUS_BLOCK_DATA:
 		if (read_write == I2C_SMBUS_READ) {
+#ifdef CONFIG_ITE_I2C_ALGO
+		        msg[1].len = 32; /* xxxxxx */
+#else /* CONFIG_ITE_I2C_ALGO */
 			printk(KERN_ERR "i2c-core.o: Block read not supported under "
 			       "I2C emulation!\n");
-		return -1;
+			return -1;
+#endif /* CONFIG_ITE_I2C_ALGO */
 		} else {
 			msg[0].len = data->block[0] + 2;
 			if (msg[0].len > 34) {
@@ -1250,6 +1254,9 @@ static s32 i2c_smbus_xfer_emulated(struct i2c_adapter * adapter, u16 addr,
 			case I2C_SMBUS_PROC_CALL:
 				data->word = msgbuf1[0] | (msgbuf1[1] << 8);
 				break;
+#ifdef CONFIG_ITE_I2C_ALGO
+			case I2C_SMBUS_BLOCK_DATA:
+#endif /* CONFIG_ITE_I2C_ALGO */
 			case I2C_SMBUS_I2C_BLOCK_DATA:
 				/* fixed at 32 for now */
 				data->block[0] = 32;

@@ -1,7 +1,8 @@
 BOOKS	:= wanbook.sgml z8530book.sgml mcabook.sgml videobook.sgml \
 	   kernel-api.sgml parportbook.sgml kernel-hacking.sgml \
 	   kernel-locking.sgml via-audio.sgml mousedrivers.sgml sis900.sgml \
-	   deviceiobook.sgml procfs-guide.sgml tulip-user.sgml ocp-guide.sgml
+	   deviceiobook.sgml procfs-guide.sgml tulip-user.sgml \
+	   lsm.sgml
 
 PS	:=	$(patsubst %.sgml, %.ps, $(BOOKS))
 PDF	:=	$(patsubst %.sgml, %.pdf, $(BOOKS))
@@ -40,6 +41,9 @@ html:	$(HTML)
 
 $(TOPDIR)/scripts/docproc:
 	$(MAKE) -C $(TOPDIR)/scripts docproc
+
+lsm.sgml: lsm.tmpl 
+	$(TOPDIR)/scripts/docgen <$< >$@
 
 mousedrivers.sgml: mousedrivers.tmpl
 	$(TOPDIR)/scripts/docgen <$< >$@
@@ -83,14 +87,11 @@ videobook.sgml: videobook.tmpl $(TOPDIR)/drivers/media/video/videodev.c
 procfs-guide.sgml:  procfs-guide.tmpl procfs_example.sgml
 	$(TOPDIR)/scripts/docgen < procfs-guide.tmpl >$@
 
-ocp-guide.sgml:  ocp-guide.tmpl  $(TOPDIR)/arch/ppc/kernel/ocp.c
-	$(TOPDIR)/scripts/docgen $(TOPDIR)/arch/ppc/kernel/ocp.c \
-	< ocp-guide.tmpl  >$@
-
 APISOURCES :=	$(TOPDIR)/drivers/media/video/videodev.c \
 		$(TOPDIR)/arch/i386/kernel/irq.c \
 		$(TOPDIR)/arch/i386/kernel/mca.c \
 		$(TOPDIR)/arch/i386/kernel/mtrr.c \
+		$(TOPDIR)/drivers/block/genhd.c \
 		$(TOPDIR)/drivers/char/misc.c \
 		$(TOPDIR)/kernel/printk.c \
 		$(TOPDIR)/drivers/net/net_init.c \
@@ -120,6 +121,7 @@ APISOURCES :=	$(TOPDIR)/drivers/media/video/videodev.c \
 		$(TOPDIR)/kernel/printk.c \
 		$(TOPDIR)/kernel/sched.c \
 		$(TOPDIR)/kernel/sysctl.c \
+		$(TOPDIR)/security/security.c \
 		$(TOPDIR)/lib/string.c \
 		$(TOPDIR)/lib/vsprintf.c \
 		$(TOPDIR)/net/netsyms.c

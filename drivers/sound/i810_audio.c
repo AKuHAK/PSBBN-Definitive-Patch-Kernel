@@ -1275,6 +1275,9 @@ static ssize_t i810_read(struct file *file, char *buffer, size_t count, loff_t *
 			dmabuf->count = dmabuf->dmasize;
 		}
 		cnt = dmabuf->count - dmabuf->fragsize;
+		if (cnt < 0) {
+			cnt = 0;
+		}
 		// this is to make the copy_to_user simpler below
 		if(cnt > (dmabuf->dmasize - swptr))
 			cnt = dmabuf->dmasize - swptr;

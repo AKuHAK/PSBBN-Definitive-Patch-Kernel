@@ -10,7 +10,7 @@
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  *
- * $Id: intrep.c,v 1.103 2001/12/10 17:37:12 asanochkin Exp $
+ * $Id: intrep.c,v 1.104 2002/03/05 14:07:39 dwmw2 Exp $
  *
  * Ported to Linux 2.3.x and MTD:
  * Copyright (C) 2000  Alexander Larsson (alex@cendio.se), Cendio Systems AB
@@ -3397,7 +3397,7 @@ jffs_garbage_collect_thread(void *ptr)
 	init_completion(&c->gc_thread_comp); /* barrier */ 
 	spin_lock_irq(&current->sigmask_lock);
 	siginitsetinv (&current->blocked, sigmask(SIGHUP) | sigmask(SIGKILL) | sigmask(SIGSTOP) | sigmask(SIGCONT));
-	recalc_sigpending(current);
+	recalc_sigpending();
 	spin_unlock_irq(&current->sigmask_lock);
 	strcpy(current->comm, "jffs_gcd");
 

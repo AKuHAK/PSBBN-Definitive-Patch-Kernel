@@ -1,3 +1,4 @@
+# $USAGI: Config.in,v 1.16 2002/02/27 12:12:51 yoshfuji Exp $
 #
 # Network device configuration
 #
@@ -48,9 +49,15 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
          if [ "$CONFIG_STB03xxx" = "y" -o "$CONFIG_403GCX" = "y" ]; then
 	    tristate '  National DP83902AV (Oak ethernet) support' CONFIG_OAKNET
 	 fi
-	 if [ "$CONFIG_XILINX_OCP" = "y" ]; then
-	    tristate '  Xilinx on-chip ethernet' CONFIG_XILINX_ENET
+	 if [ "$CONFIG_405GP" = "y" -o "$CONFIG_NP405" = "y" ]; then
+            bool '  PowerPC 405 on-chip ethernet' CONFIG_PPC405_ENET
 	 fi
+	 if [ "$CONFIG_PPC405_ENET" = "y" ]; then
+	    bool '    Verbose error messages' CONFIG_PPC405_ENET_ERROR_MSG
+	    int '    Number of receive buffers' CONFIG_PPC405_ENET_RX_BUFF 64
+	    int '    Number of transmit buffers' CONFIG_PPC405_ENET_TX_BUFF 8
+	    int '    Frame gap' CONFIG_PPC405_ENET_GAP 8
+         fi
       fi
    fi
    if [ "$CONFIG_ZORRO" = "y" ]; then
@@ -65,17 +72,11 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
    if [ "$CONFIG_MIPS_JAZZ" = "y" ]; then
       tristate '  MIPS JAZZ onboard SONIC Ethernet support' CONFIG_MIPS_JAZZ_SONIC
    fi
-   if [ "$CONFIG_XTENSA_XT2000" = "y" ]; then
-      tristate '  Xtensa XT2000 onboard SONIC Ethernet support' CONFIG_XTENSA_XT2000_SONIC
-   fi
    if [ "$CONFIG_MIPS_GT96100" = "y" ]; then
       bool '  MIPS GT96100 Ethernet support' CONFIG_MIPS_GT96100ETH
    fi
    if [ "$CONFIG_MIPS_AU1000" = "y" ]; then
       bool '  MIPS AU1000 Ethernet support' CONFIG_MIPS_AU1000_ENET
-   fi
-   if [ "$CONFIG_MIPS_RC32355" = "y" ]; then
-      bool '  IDT RC32355 Ethernet support' CONFIG_MIPS_RC32355_ETH
    fi
    if [ "$CONFIG_SIBYTE_SB1250" = "y" ]; then
       tristate '  SB1250 Ethernet support' CONFIG_NET_SB1250_MAC
@@ -126,20 +127,7 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
       dep_tristate '    SMC Ultra support' CONFIG_ULTRA $CONFIG_ISA
       dep_tristate '    SMC Ultra32 EISA support' CONFIG_ULTRA32 $CONFIG_EISA
       tristate '    SMC 9194 support' CONFIG_SMC9194
-      tristate '    SMC 91111 support' CONFIG_SMC91111
-      if [ "$CONFIG_SMC91111" != "n" ]; then
-	 bool '      Advanced configuration options for SMC91111' CONFIG_SMC91111_ADVANCED
-	 if [ "$CONFIG_SMC91111_ADVANCED" = "n" ]; then
-	    define_bool CONFIG_SMC91111_BYTE_SWAP n
-	    define_bool CONFIG_SMC91111_USE_8_BIT y
-	    define_bool CONFIG_SMC91111_USE_32_BIT y
-	 else
-	    bool '      Byte swap device accesses' CONFIG_SMC91111_BYTE_SWAP
-	    bool '      Allow 8 bit device accesses' CONFIG_SMC91111_USE_8_BIT
-	    bool '      Allow 32 bit device accesses' CONFIG_SMC91111_USE_32_BIT
- 	 fi
-      fi
-
+      tristate '    SMC 91111 single-chip ethernet support' CONFIG_SMC91111
    fi
    bool '  Racal-Interlan (Micom) NI cards' CONFIG_NET_VENDOR_RACAL
    if [ "$CONFIG_NET_VENDOR_RACAL" = "y" ]; then
@@ -169,6 +157,7 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
       tristate '    HP PCLAN (27245 and other 27xxx series) support' CONFIG_HPLAN
       tristate '    LP486E on board Ethernet' CONFIG_LP486E
       tristate '    ICL EtherTeam 16i/32 support' CONFIG_ETH16I
+      tristate '    NE2000/NE1000 support' CONFIG_NE2000
       if [ "$CONFIG_OBSOLETE" = "y" ]; then
 	 dep_tristate '    SEEQ8005 support (EXPERIMENTAL)' CONFIG_SEEQ8005 $CONFIG_EXPERIMENTAL
       fi
@@ -177,16 +166,10 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
       fi
       tristate '    CS89x0 support' CONFIG_CS89x0
    fi
-   if [ "$CONFIG_NET_ISA" = "y" -o "$CONFIG_NEC_OSPREY" = "y" ]; then
-      tristate '    NE2000/NE1000 support' CONFIG_NE2000
-   fi
    if [ "$CONFIG_MCA" = "y" ]; then
       tristate '  SKnet MCA support' CONFIG_SKMC
       tristate '  NE/2 (ne2000 MCA version) support' CONFIG_NE2_MCA
       tristate '  IBM LAN Adapter/A support' CONFIG_IBMLANA
-   fi
-   if [ "$CONFIG_GT64260" = "y" ]; then
-     bool '  GT64260 Embedded Ethernet Controllers' CONFIG_GT64260_ETH
    fi
    if [ "$CONFIG_ISA" = "y" -o "$CONFIG_EISA" = "y" -o "$CONFIG_PCI" = "y" ]; then
      bool '  EISA, VLB, PCI and on board controllers' CONFIG_NET_PCI
@@ -195,6 +178,7 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
    fi
    if [ "$CONFIG_NET_PCI" = "y" ]; then
       dep_tristate '    AMD PCnet32 PCI support' CONFIG_PCNET32 $CONFIG_PCI
+      dep_mbool    '        Use VMware support with AMD PCnet32(EXPERIMENTAL)' CONFIG_PCNET32_VMWARE $CONFIG_PCNET32 $CONFIG_EXPERIMENTAL
       dep_tristate '    Adaptec Starfire support (EXPERIMENTAL)' CONFIG_ADAPTEC_STARFIRE $CONFIG_PCI $CONFIG_EXPERIMENTAL
       if [ "$CONFIG_ISA" = "y" -o "$CONFIG_EISA" = "y" ]; then
 	 dep_tristate '    Ansel Communications EISA 3200 support (EXPERIMENTAL)' CONFIG_AC3200 $CONFIG_EXPERIMENTAL
@@ -214,6 +198,11 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
       fi
       dep_tristate '    Davicom DM910x/DM980x support' CONFIG_DM9102 $CONFIG_PCI
       dep_tristate '    EtherExpressPro/100 support' CONFIG_EEPRO100 $CONFIG_PCI
+      dep_tristate '    EtherExpressPro/100 Intel Driver support' CONFIG_INTEL_E100 $CONFIG_PCI
+      if [ "$CONFIG_INTEL_E100" = "y" -o "$CONFIG_INTEL_E100" = "m" ]; then
+	 bool      '        EtherExpressPro/100 Intel Driver PROC interface' CONFIG_INTEL_E100_PROC
+	 bool      '        EtherExpressPro/100 Intel Driver Diagnostics' CONFIG_INTEL_E100_IDIAG
+      fi
       dep_tristate '    Mylex EISA LNE390A/B support (EXPERIMENTAL)' CONFIG_LNE390 $CONFIG_EISA $CONFIG_EXPERIMENTAL
       dep_tristate '    Myson MTD-8xx PCI Ethernet support' CONFIG_FEALNX $CONFIG_PCI
       dep_tristate '    National Semiconductor DP8381x series PCI Ethernet support' CONFIG_NATSEMI $CONFIG_PCI
@@ -261,6 +250,9 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
    if [ "$CONFIG_BAGET_MIPS" = "y" ]; then
       tristate '  Baget AMD LANCE support' CONFIG_BAGETLANCE
    fi
+   if [ "$CONFIG_NEC_OSPREY" = "y" ]; then
+      bool '  Memory-mapped onboard NE2000-compatible ethernet' CONFIG_NE2000
+   fi
    if [ "$CONFIG_NEC_KORVA" = "y" ]; then
       bool '  NEC Memory-mapped onboard (Candy) Ethernet' CONFIG_NEC_CANDY
    fi
@@ -276,7 +268,6 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
         tristate '   MontaVista(tm) Net DMA Support' CONFIG_HHNET_DMA
      fi 
    fi
-   dep_tristate 'IBM NPNet NP4GS3 Backplane Networking' CONFIG_NPNET $CONFIG_PCI
 fi
 
 endmenu
@@ -293,13 +284,11 @@ if [ "$CONFIG_ACENIC" != "n" ]; then
    bool '  Omit support for old Tigon I based AceNICs' CONFIG_ACENIC_OMIT_TIGON_I
 fi
 dep_tristate 'D-Link DL2000-based Gigabit Ethernet support' CONFIG_DL2K $CONFIG_PCI
-dep_tristate 'Intel PRO/1000 support' CONFIG_E1000 $CONFIG_PCI
 dep_tristate 'MyriCOM Gigabit Ethernet support' CONFIG_MYRI_SBUS $CONFIG_SBUS
 dep_tristate 'National Semiconduct DP83820 support' CONFIG_NS83820 $CONFIG_PCI
 dep_tristate 'Packet Engines Hamachi GNIC-II support' CONFIG_HAMACHI $CONFIG_PCI
 dep_tristate 'Packet Engines Yellowfin Gigabit-NIC support (EXPERIMENTAL)' CONFIG_YELLOWFIN $CONFIG_PCI $CONFIG_EXPERIMENTAL
 dep_tristate 'SysKonnect SK-98xx support' CONFIG_SK98LIN $CONFIG_PCI
-dep_tristate 'Broadcom BCM5700 support (bcm5700)' CONFIG_NET_BROADCOM $CONFIG_PCI
 
 endmenu
 
@@ -386,9 +375,6 @@ fi
 if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
    dep_tristate 'Red Creek Hardware VPN (EXPERIMENTAL)' CONFIG_RCPCI $CONFIG_PCI
    tristate 'Traffic Shaper (EXPERIMENTAL)' CONFIG_SHAPER
-fi
-if [ "$CONFIG_IBM_OCP" = "y" ]; then
-	 source drivers/net/ibm_ocp/Config.in
 fi
 
 source drivers/net/wan/Config.in

@@ -55,6 +55,20 @@
 
 #undef	DEBUG
 
+#define UART_CORE_DEBUG 0            /* Set this to debug */
+
+#if UART_CORE_DEBUG >= 2
+#define PRINTK2(format, args...) printk("UART_CORE: %s:%d\t" format "\n", __FUNCTION__ , __LINE__ , ## args)
+#else
+#define PRINTK2(format, args...)
+#endif
+
+#if UART_CORE_DEBUG >= 1
+#define PRINTK1(format, args...) printk("UART_CORE: %s:%d\t" format "\n", __FUNCTION__ , __LINE__ , ## args)
+#else
+#define PRINTK1(format, args...)
+#endif
+
 #ifndef CONFIG_PM
 #define pm_access(pm)		do { } while (0)
 #define pm_unregister(pm)	do { } while (0)
@@ -107,6 +121,7 @@ static void uart_stop(struct tty_struct *tty)
 static void __uart_start(struct tty_struct *tty)
 {
 	struct uart_info *info = tty->driver_data;
+        PRINTK1("");
 	if (info->xmit.head != info->xmit.tail && info->xmit.buf &&
 	    !tty->stopped && !tty->hw_stopped)
 		info->ops->start_tx(info->port, 1, 1);
@@ -156,6 +171,8 @@ static int uart_startup(struct uart_info *info)
 	unsigned long flags;
 	unsigned long page;
 	int retval = 0;
+
+        PRINTK1("");
 
 	page = get_zeroed_page(GFP_KERNEL);
 	if (!page)
@@ -289,13 +306,18 @@ static void uart_change_speed(struct uart_info *info, struct termios *old_termio
 	struct uart_port *port = info->port;
 	u_int quot, baud, cflag, bits, try;
 
+        PRINTK1("");
+
 	/*
 	 * If we have no tty, termios, or the port does not exist,
 	 * then we can't set the parameters for this port.
 	 */
 	if (!info->tty || !info->tty->termios ||
-	    info->port->type == PORT_UNKNOWN)
+	    info->port->type == PORT_UNKNOWN) 
+            {
+                PRINTK1("PORT_UNKNOWN");
 		return;
+            }
 
 	cflag = info->tty->termios->c_cflag;
 
@@ -357,7 +379,6 @@ static void uart_change_speed(struct uart_info *info, struct termios *old_termio
 #define RELEVENT_IFLAG(iflag)	((iflag) & (IGNBRK|BRKINT|IGNPAR|PARMRK|INPCK))
 
 	pm_access(info->state->pm);
-
 	info->ops->change_speed(port, cflag, info->tty->termios->c_iflag, quot);
 }
 
@@ -819,6 +840,7 @@ static int uart_do_autoconfig(struct uart_info *info)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
+        PRINTK1("");
 	/*
 	 * Take the 'count' lock.  This prevents count
 	 * from incrementing, and hence any extra opens
@@ -1684,6 +1706,7 @@ uart_set_options(struct uart_port *port, struct console *co,
 	case 115200:	cflag |= B115200;		break;
 	case 230400:	cflag |= B230400;		break;
 	case 460800:	cflag |= B460800;		break;
+	case 921600:	cflag |= B921600;		break;
 	}
 
 	if (bits == 7)
@@ -1715,6 +1738,7 @@ extern void sa1100_rs_console_init(void);
 extern void ixp1200_console_init(void);
 extern void serial8250_console_init(void);
 extern void uart00_console_init(void);
+extern void dragonball_console_init(void);
 
 /*
  * Central "initialise all serial consoles" container.  Needs to be killed.
@@ -1744,6 +1768,9 @@ void __init uart_console_init(void)
 #endif
 #ifdef CONFIG_SERIAL_UART00_CONSOLE
 	uart00_console_init();
+#endif
+#ifdef CONFIG_SERIAL_DRAGONBALL_CONSOLE
+	dragonball_console_init();
 #endif
 }
 #endif /* CONFIG_SERIAL_CORE_CONSOLE */
@@ -1851,7 +1878,7 @@ uart_report_port(struct uart_driver *drv, struct uart_port *port)
 		printk("I/O 0x%x offset 0x%x", port->iobase, port->hub6);
 		break;
 	case SERIAL_IO_MEM:
-		printk("MEM 0x%x", port->mapbase);
+		printk("MEM 0x%x", (unsigned int)port->mapbase);
 		break;
 	}
 	printk(" (irq = %d) is a %s\n", port->irq, uart_type(port));
@@ -1862,6 +1889,8 @@ uart_setup_port(struct uart_driver *drv, struct uart_state *state)
 {
 	struct uart_port *port = state->port;
 	int flags = UART_CONFIG_TYPE;
+
+        PRINTK1("");
 
 	init_MUTEX(&state->count_sem);
 
@@ -2004,22 +2033,15 @@ int uart_register_driver(struct uart_driver *drv)
 	}
 
 	retval = tty_register_driver(normal);
-	if (retval<0)
+	if (retval)
 		goto out;
 
 	retval = tty_register_driver(callout);
-	if (retval<0){
+	if (retval)
 		tty_unregister_driver(normal);
-		goto out;
-	}
-	
-	if(!drv->normal_major)
-		drv->normal_major=normal->major;
-	if(!drv->callout_major)
-		drv->callout_major=callout->major;
 
 out:
-	if ((retval<0) && drv->state)
+	if (retval && drv->state)
 		kfree(drv->state);
 	return retval;
 }
@@ -2077,6 +2099,7 @@ int uart_register_port(struct uart_driver *drv, struct uart_port *port)
 	struct uart_state *state = NULL;
 	int i, flags = UART_CONFIG_TYPE;
 
+        PRINTK1("");
 	/*
 	 * First, find a port entry which matches.  Note: if we do
 	 * find a matching entry, and it has a non-zero use count,
@@ -2148,7 +2171,6 @@ int uart_register_port(struct uart_driver *drv, struct uart_port *port)
 	 */
 	state->port->iobase   = port->iobase;
 	state->port->membase  = port->membase;
-	state->port->mapbase  = port->mapbase;
 	state->port->irq      = port->irq;
 	state->port->uartclk  = port->uartclk;
 	state->port->fifosize = port->fifosize;

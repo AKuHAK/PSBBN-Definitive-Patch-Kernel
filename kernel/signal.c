@@ -13,6 +13,7 @@
 #include <linux/smp_lock.h>
 #include <linux/init.h>
 #include <linux/sched.h>
+#include <linux/security.h>
 
 #include <linux/trace.h>
 
@@ -519,6 +520,8 @@ printk("SIG queue (%s:%d): %d ", t->comm, t->pid, sig);
 	/* The somewhat baroque permissions check... */
 	ret = -EPERM;
 	if (bad_signal(sig, info, t))
+		goto out_nolock;
+	if ((ret = security_task_kill(t, info, sig)))
 		goto out_nolock;
 
 	/* The null signal is a permissions and process existance probe.

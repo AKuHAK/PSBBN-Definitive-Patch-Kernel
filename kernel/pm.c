@@ -41,7 +41,11 @@ int pm_current_state = PM_STATE_NORMAL;
  *	until a resume but that will be fine.
  */
  
+#ifdef CONFIG_SNSC
+DECLARE_MUTEX(pm_devs_lock);
+#else
 static DECLARE_MUTEX(pm_devs_lock);
+#endif /* CONFIG_SNSC */
 static LIST_HEAD(pm_devs);
 
 /**
@@ -296,4 +300,7 @@ EXPORT_SYMBOL(pm_find);
 EXPORT_SYMBOL(pm_active);
 #if	defined(CONFIG_ARCH_SA1100)
 EXPORT_SYMBOL(pm_current_state);
+#endif
+#ifdef CONFIG_SNSC
+EXPORT_SYMBOL(pm_devs_lock);
 #endif

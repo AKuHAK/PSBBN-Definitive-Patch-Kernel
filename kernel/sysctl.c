@@ -30,6 +30,7 @@
 #include <linux/init.h>
 #include <linux/sysrq.h>
 #include <linux/highuid.h>
+#include <linux/security.h>
 
 #include <asm/uaccess.h>
 
@@ -394,6 +395,10 @@ static int test_perm(int mode, int op)
 
 static inline int ctl_perm(ctl_table *table, int op)
 {
+	int error;
+	if ((error = security_sysctl(table, op))) {
+		return error;
+	}
 	return test_perm(table->mode, op);
 }
 

@@ -90,8 +90,8 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/smp_lock.h>
-#if defined(CONFIG_SH_KGDB_CONSOLE) || \
-    defined(__arm__) && defined(CONFIG_KGDB_CONSOLE)
+#include <linux/security.h>
+#if defined(CONFIG_SH_KGDB_CONSOLE)
 #include <asm/kgdb.h>
 #endif
 
@@ -165,7 +165,6 @@ extern void tx3912_console_init(void);
 extern void tx3912_rs_init(void);
 extern void txx927_console_init(void);
 extern void sb1250_serial_console_init(void);
-extern void gt64260_mpsc_console_init(void);
 extern void sicc_console_init(void);
 
 #ifndef MIN
@@ -1472,6 +1471,8 @@ static int tty_fasync(int fd, struct file * filp, int on)
 		if (!waitqueue_active(&tty->read_wait))
 			tty->minimum_to_wake = 1;
 		if (filp->f_owner.pid == 0) {
+			if ((retval = security_file_set_fowner(filp)))
+				return retval;
 			filp->f_owner.pid = (-tty->pgrp) ? : current->pid;
 			filp->f_owner.uid = current->uid;
 			filp->f_owner.euid = current->euid;
@@ -2194,8 +2195,7 @@ void __init console_init(void)
 #ifdef CONFIG_VT
 	con_init();
 #endif
-#if defined(CONFIG_SH_KGDB_CONSOLE) || \
-    defined(__arm__) && defined(CONFIG_KGDB_CONSOLE)
+#if defined(CONFIG_SH_KGDB_CONSOLE)
 	kgdb_console_init();
 #endif
 #ifdef CONFIG_AU1000_SERIAL_CONSOLE
@@ -2217,8 +2217,6 @@ void __init console_init(void)
  	mac_scc_console_init();
 #elif defined(CONFIG_PARISC)
 	pdc_console_init();
-#elif defined(CONFIG_GT64260_CONSOLE)
-	gt64260_mpsc_console_init();
 #elif defined(CONFIG_SERIAL)
 	serial_console_init();
 #endif /* CONFIG_8xx */
@@ -2262,13 +2260,6 @@ void __init console_init(void)
 #ifdef CONFIG_SIBYTE_SB1250_DUART_CONSOLE
 	sb1250_serial_console_init();
 #endif
-#ifdef CONFIG_TX4925_SIO_CONSOLE
-	tx4925_sio_console_init();
-#endif
-#ifdef CONFIG_TX4927_SIO_CONSOLE
-	tx4927_sio_console_init();
-#endif
-
 }
 
 static struct tty_driver dev_tty_driver, dev_syscons_driver;
@@ -2358,12 +2349,6 @@ void __init tty_init(void)
 #endif
 #ifdef CONFIG_SERIAL_TX3912
 	tx3912_rs_init();
-#endif
-#ifdef CONFIG_TX4925_SIO
-	tx4925_sio_init();
-#endif
-#ifdef CONFIG_TX4927_SIO
-	tx4927_sio_init();
 #endif
 #ifdef CONFIG_ROCKETPORT
 	rp_init();

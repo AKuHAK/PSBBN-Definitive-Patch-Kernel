@@ -69,7 +69,11 @@ u32 get_au1000_avail_gpio_mask(void)
 {
 	int i;
 	u32 pinfunc = inl(SYS_PINFUNC);
+#if 1
+	u32 avail_mask = 0x00000033; // start with gpio[0145] available
+#else
 	u32 avail_mask = 0; // start with no gpio available
+#endif
 
 	// first, check for GPIO's reprogrammed as peripheral pins
 	for (i=0; i<15; i++) {
@@ -89,6 +93,10 @@ u32 get_au1000_avail_gpio_mask(void)
 #ifndef CONFIG_AU1000_USB_DEVICE
 	avail_mask &= ~((1<<5) | (1<<13));
 #endif
+#endif
+
+#ifdef CONFIG_SNSC_MPU200
+	avail_mask &= 0x18008006;	/* MPU200 original HW configuration */
 #endif
 	
 	return avail_mask;

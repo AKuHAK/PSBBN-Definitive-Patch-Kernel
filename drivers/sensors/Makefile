@@ -31,6 +31,7 @@ obj-$(CONFIG_SENSORS_THMC50)	+= thmc50.o
 obj-$(CONFIG_SENSORS_VIA686A)	+= via686a.o
 obj-$(CONFIG_SENSORS_W83781D)	+= w83781d.o
 obj-$(CONFIG_SENSORS_X9221)	+= x9221.o
+obj-$(CONFIG_SENSORS_PCF8591T)	+= pcf8591t.o
 
 include $(TOPDIR)/Rules.make
 

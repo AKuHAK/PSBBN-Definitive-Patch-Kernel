@@ -24,6 +24,7 @@
 #include <linux/mm.h>
 #include <linux/iobuf.h>
 #include <linux/compiler.h>
+#include <linux/security.h>
 
 #include <linux/trace.h>
 
@@ -122,6 +123,12 @@ static inline void remove_page_from_hash_queue(struct page * page)
  */
 void __remove_inode_page(struct page *page)
 {
+
+	if (DelallocPage(page)) {
+		printk("Delalloc page %p removed from inode\n", page);
+		BUG();
+	}
+
 	if (PageDirty(page)) BUG();
 	remove_page_from_inode_queue(page);
 	remove_page_from_hash_queue(page);
@@ -1293,6 +1300,8 @@ void mark_page_accessed(struct page *page)
 	SetPageReferenced(page);
 }
 
+EXPORT_SYMBOL(mark_page_accessed);
+
 /*
  * This is a generic file read routine, and uses the
  * inode->i_op->readpage() function for the actual low-level
@@ -1731,6 +1740,9 @@ asmlinkage ssize_t sys_sendfile(int out_fd, int in_fd, off_t *offset, size_t cou
 	if (retval)
 		goto fput_in;
 
+	if ((retval = security_file_permission (in_file, MAY_READ)))
+		goto fput_in;
+
 	/*
 	 * Get output file, and verify that it is ok..
 	 */
@@ -1746,6 +1758,9 @@ asmlinkage ssize_t sys_sendfile(int out_fd, int in_fd, off_t *offset, size_t cou
 	out_inode = out_file->f_dentry->d_inode;
 	retval = locks_verify_area(FLOCK_VERIFY_WRITE, out_inode, out_file, out_file->f_pos, count);
 	if (retval)
+		goto fput_out;
+
+	if ((retval = security_file_permission (out_file, MAY_WRITE)))
 		goto fput_out;
 
 	retval = 0;

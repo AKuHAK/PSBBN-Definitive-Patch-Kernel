@@ -12,6 +12,7 @@
 #include <linux/completion.h>
 #include <linux/personality.h>
 #include <linux/tty.h>
+#include <linux/security.h>
 #ifdef CONFIG_BSD_PROCESS_ACCT
 #include <linux/acct.h>
 #endif
@@ -48,6 +49,7 @@ static void release_task(struct task_struct * p)
 		task_unlock(p);
 #endif
 		atomic_dec(&p->user->processes);
+		security_task_free(p);
 		free_uid(p->user);
 		unhash_process(p);
 
@@ -534,6 +536,10 @@ repeat:
 			if (((p->exit_signal != SIGCHLD) ^ ((options & __WCLONE) != 0))
 			    && !(options & __WALL))
 				continue;
+
+			if (security_task_wait(p))
+				continue;
+
 			flag = 1;
 			switch (p->state) {
 			case TASK_STOPPED:

@@ -12,6 +12,7 @@
 #include <linux/mm.h>
 #include <linux/highmem.h>
 #include <linux/smp_lock.h>
+#include <linux/security.h>
 
 #include <asm/pgtable.h>
 #include <asm/uaccess.h>
@@ -54,7 +55,9 @@ int ptrace_check_attach(struct task_struct *child, int kill)
 
 int ptrace_attach(struct task_struct *task)
 {
+	int retval;
 	task_lock(task);
+	retval = -EPERM;
 	if (task->pid <= 1)
 		goto bad;
 	if (task == current)
@@ -66,7 +69,6 @@ int ptrace_attach(struct task_struct *task)
 	    (current->uid != task->uid) ||
  	    (current->gid != task->egid) ||
  	    (current->gid != task->sgid) ||
- 	    (!cap_issubset(task->cap_permitted, current->cap_permitted)) ||
  	    (current->gid != task->gid)) && !capable(CAP_SYS_PTRACE))
 		goto bad;
 	rmb();
@@ -74,6 +76,8 @@ int ptrace_attach(struct task_struct *task)
 		goto bad;
 	/* the same process cannot be attached many times */
 	if (task->ptrace & PT_PTRACED)
+		goto bad;
+	if ((retval = security_ptrace(current, task)))
 		goto bad;
 
 	/* Go */
@@ -95,7 +99,7 @@ int ptrace_attach(struct task_struct *task)
 
 bad:
 	task_unlock(task);
-	return -EPERM;
+	return retval;
 }
 
 int ptrace_detach(struct task_struct *child, unsigned int data)

@@ -10,7 +10,7 @@
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  *
- * $Id: jffs_fm.c,v 1.28 2001/12/10 17:37:12 asanochkin Exp $
+ * $Id: jffs_fm.c,v 1.29 2002/01/22 09:48:16 cdavies Exp $
  *
  * Ported to Linux 2.3.x and MTD:
  * Copyright (C) 2000  Alexander Larsson (alex@cendio.se), Cendio Systems AB
@@ -20,7 +20,13 @@
 #include <linux/slab.h>
 #include <linux/blkdev.h>
 #include <linux/jffs.h>
+#include <linux/compatmac.h>
 #include "jffs_fm.h"
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,2)
+#define minor(x) MINOR(x)
+#define major(x) MAJOR(x)
+#endif
 
 #if defined(JFFS_MARK_OBSOLETE) && JFFS_MARK_OBSOLETE
 static int jffs_mark_obsolete(struct jffs_fmcontrol *fmc, __u32 fm_offset);
@@ -46,7 +52,7 @@ jffs_build_begin(struct jffs_control *c, kdev_t dev)
 	}
 	DJM(no_jffs_fmcontrol++);
 
-	mtd = get_mtd_device(NULL, MINOR(dev));
+	mtd = get_mtd_device(NULL, minor(dev));
 
 	if (!mtd) {
 		kfree(fmc);

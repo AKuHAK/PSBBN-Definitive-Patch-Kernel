@@ -104,6 +104,11 @@ static irq_info_t irq_table[NR_IRQS] = { { 0, 0, 0 }, /* etc */ };
 
 ======================================================================*/
 
+#if defined(CONFIG_MIPS_SNSC_MPU210) && defined(CONFIG_ISA)
+/* For 16-bit PC Card Support */
+static struct resource pccard_io_resource = { "PC Card I/O", 0x0000, 0xffff, IORESOURCE_IO, NULL, NULL, NULL };
+#endif
+
 static struct resource *resource_parent(unsigned long b, unsigned long n,
 					int flags, struct pci_dev *dev)
 {
@@ -127,6 +132,11 @@ static struct resource *resource_parent(unsigned long b, unsigned long n,
 static inline int check_io_resource(unsigned long b, unsigned long n,
 				    struct pci_dev *dev)
 {
+#if defined(CONFIG_MIPS_SNSC_MPU210) && defined(CONFIG_ISA)
+	/* For 16-bit PC Card support */
+	if ((b & ~0xffffUL) == 0)
+		return check_resource(&pccard_io_resource, b, n);
+#endif
 	return check_resource(resource_parent(b, n, IORESOURCE_IO, dev), b, n);
 }
 
@@ -158,6 +168,11 @@ static int request_io_resource(unsigned long b, unsigned long n,
 	struct resource *pr = resource_parent(b, n, IORESOURCE_IO, dev);
 	int err = -ENOMEM;
 
+#if defined(CONFIG_MIPS_SNSC_MPU210) && defined(CONFIG_ISA)
+	/* For 16-bit PC Card support */
+	if ((b & ~0xffffUL) == 0)
+		pr = &pccard_io_resource;
+#endif
 	if (res) {
 		err = request_resource(pr, res);
 		if (err)

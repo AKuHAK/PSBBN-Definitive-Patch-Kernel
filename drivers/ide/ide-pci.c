@@ -89,7 +89,6 @@
 #define DEVID_OSB4	((ide_pci_devid_t){PCI_VENDOR_ID_SERVERWORKS, PCI_DEVICE_ID_SERVERWORKS_OSB4IDE})
 #define DEVID_CSB5	((ide_pci_devid_t){PCI_VENDOR_ID_SERVERWORKS, PCI_DEVICE_ID_SERVERWORKS_CSB5IDE})
 #define DEVID_ITE8172G	((ide_pci_devid_t){PCI_VENDOR_ID_ITE,     PCI_DEVICE_ID_ITE_IT8172G})
-#define DEVID_TC86C001	((ide_pci_devid_t){PCI_VENDOR_ID_TOSHIBA_2, PCI_DEVICE_ID_TOSHIBA_TC86C001_IDE})
 
 #define	IDE_IGNORE	((void *)-1)
 
@@ -373,19 +372,6 @@ extern void ide_dmacapable_via82cxxx(ide_hwif_t *, unsigned long);
 #define DMA_VIA82CXXX	NULL
 #endif
 
-#ifdef CONFIG_BLK_DEV_TC86C001
-extern unsigned int pci_init_tc86c001(struct pci_dev *, const char *);
-extern unsigned int ata66_tc86c001(ide_hwif_t *);
-extern void ide_init_tc86c001(ide_hwif_t *);
-#define PCI_TC86C001	&pci_init_tc86c001
-#define ATA66_TC86C001	&ata66_tc86c001
-#define INIT_TC86C001	&ide_init_tc86c001
-#else
-#define PCI_TC86C001	NULL
-#define ATA66_TC86C001	NULL
-#define INIT_TC86C001	NULL
-#endif
-
 typedef struct ide_pci_enablebit_s {
 	byte	reg;	/* byte pci reg holding the enable-bit */
 	byte	mask;	/* mask to isolate the enable-bit */
@@ -478,7 +464,6 @@ static ide_pci_device_t ide_pci_chipsets[] __initdata = {
         {DEVID_OSB4,    "ServerWorks OSB4",		PCI_SVWKS,	ATA66_SVWKS,	INIT_SVWKS,	NULL,		{{0x00,0x00,0x00}, {0x00,0x00,0x00}},	ON_BOARD,	0 },
 	{DEVID_CSB5,	"ServerWorks CSB5",		PCI_SVWKS,	ATA66_SVWKS,	INIT_SVWKS,	NULL,		{{0x00,0x00,0x00}, {0x00,0x00,0x00}},	ON_BOARD,	0 },
 	{DEVID_ITE8172G,"IT8172G",	PCI_IT8172,	NULL,	INIT_IT8172,	NULL,		{{0x00,0x00,0x00}, {0x40,0x00,0x01}},	ON_BOARD,	0 },
-	{DEVID_TC86C001,"TC86C001",	PCI_TC86C001,	ATA66_TC86C001,	INIT_TC86C001,	NULL,		{{0x00,0x00,0x00}, {0x0a,0x00,0xff}},	ON_BOARD,	0 },
 	{IDE_PCI_DEVID_NULL, "PCI_IDE",	NULL,		NULL,		NULL,		NULL,		{{0x00,0x00,0x00}, {0x00,0x00,0x00}}, 	ON_BOARD,	0 }};
 
 /*
@@ -948,7 +933,7 @@ void __init ide_scan_pcidev (struct pci_dev *dev)
 		return;
 	else if (IDE_PCI_DEVID_EQ(d->devid, DEVID_CY82C693) && (!(PCI_FUNC(dev->devfn) & 1) || !((dev->class >> 8) == PCI_CLASS_STORAGE_IDE)))
 		return;	/* CY82C693 is more than only a IDE controller */
-	else if (IDE_PCI_DEVID_EQ(d->devid, DEVID_ITE8172G) && (!(PCI_FUNC(dev->devfn) & 1) || !((dev->class >> 8) == PCI_CLASS_STORAGE_IDE)))
+	else if (IDE_PCI_DEVID_EQ(d->devid, DEVID_ITE8172G) && ((PCI_FUNC(dev->devfn) == 7) || !((dev->class >> 8) == PCI_CLASS_STORAGE_IDE)))
 		return;	/* IT8172G is also more than only an IDE controller */
 	else if (IDE_PCI_DEVID_EQ(d->devid, DEVID_UM8886A) && !(PCI_FUNC(dev->devfn) & 1))
 		return;	/* UM8886A/BF pair */

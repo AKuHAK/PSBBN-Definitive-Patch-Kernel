@@ -1,7 +1,7 @@
 /* 
    Common Flash Interface probe code.
    (C) 2000 Red Hat. GPL'd.
-   $Id: cfi_probe.c,v 1.66 2001/10/02 15:05:12 dwmw2 Exp $
+   $Id: cfi_probe.c,v 1.69 2002/05/11 22:13:03 dwmw2 Exp $
 */
 
 #include <linux/config.h>
@@ -24,16 +24,13 @@
 static void print_cfi_ident(struct cfi_ident *);
 #endif
 
-int cfi_jedec_setup(struct cfi_private *p_cfi, int index);
-int cfi_jedec_lookup(int index, int mfr_id, int dev_id);
-
 static int cfi_probe_chip(struct map_info *map, __u32 base,
 			  struct flchip *chips, struct cfi_private *cfi);
 static int cfi_chip_setup(struct map_info *map, struct cfi_private *cfi);
 
 struct mtd_info *cfi_probe(struct map_info *map);
 
-/* check for QRY, or search for jedec id.
+/* check for QRY.
    in: interleave,type,mode
    ret: table index, <0 for error
  */
@@ -44,9 +41,10 @@ static inline int qry_present(struct map_info *map, __u32 base,
 
 	if (cfi_read(map,base+osf*0x10)==cfi_build_cmd('Q',map,cfi) &&
 	    cfi_read(map,base+osf*0x11)==cfi_build_cmd('R',map,cfi) &&
-	    cfi_read(map,base+osf*0x12)==cfi_build_cmd('Y',map,cfi)) {
-		return 1;       // ok !
-	}
+	    cfi_read(map,base+osf*0x12)==cfi_build_cmd('Y',map,cfi))
+		return 1;	// ok !
+
+	printk(KERN_INFO "cfi_probe: qry_present can't find \"QRY\"\n");
 	return 0; 	// nothing found
 }
 
@@ -55,7 +53,19 @@ static int cfi_probe_chip(struct map_info *map, __u32 base,
 {
 	int i;
 	
-	cfi_send_gen_cmd(0xFF, 0, base, map, cfi, cfi->device_type, NULL);
+	if ((base + 0) >= map->size) {
+		printk(KERN_NOTICE
+			"Probe at base[0x00](0x%08lx) past the end of the map(0x%08lx)\n",
+			(unsigned long)base, map->size -1);
+		return 0;
+	}
+	if ((base + 0xff) >= map->size) {
+		printk(KERN_NOTICE
+			"Probe at base[0x55](0x%08lx) past the end of the map(0x%08lx)\n",
+			(unsigned long)base + 0x55, map->size -1);
+		return 0;
+	}
+	cfi_send_gen_cmd(0xF0, 0, base, map, cfi, cfi->device_type, NULL);
 	cfi_send_gen_cmd(0x98, 0x55, base, map, cfi, cfi->device_type, NULL);
 
 	if (!qry_present(map,base,cfi))
@@ -74,7 +84,7 @@ static int cfi_probe_chip(struct map_info *map, __u32 base,
 		if (qry_present(map,chips[i].start,cfi)) {
 			/* Eep. This chip also had the QRY marker. 
 			 * Is it an alias for the new one? */
-			cfi_send_gen_cmd(0xFF, 0, chips[i].start, map, cfi, cfi->device_type, NULL);
+			cfi_send_gen_cmd(0xF0, 0, chips[i].start, map, cfi, cfi->device_type, NULL);
 
 			/* If the QRY marker goes away, it's an alias */
 			if (!qry_present(map, chips[i].start, cfi)) {
@@ -86,7 +96,7 @@ static int cfi_probe_chip(struct map_info *map, __u32 base,
 			 * unfortunate. Stick the new chip in read mode
 			 * too and if it's the same, assume it's an alias. */
 			/* FIXME: Use other modes to do a proper check */
-			cfi_send_gen_cmd(0xFF, 0, base, map, cfi, cfi->device_type, NULL);
+			cfi_send_gen_cmd(0xF0, 0, base, map, cfi, cfi->device_type, NULL);
 			
 			if (qry_present(map, base, cfi)) {
 				printk(KERN_DEBUG "%s: Found an alias at 0x%x for the chip at 0x%lx\n",
@@ -108,7 +118,7 @@ static int cfi_probe_chip(struct map_info *map, __u32 base,
 	cfi->numchips++;
 	
 	/* Put it back into Read Mode */
-	cfi_send_gen_cmd(0xFF, 0, base, map, cfi, cfi->device_type, NULL);
+	cfi_send_gen_cmd(0xF0, 0, base, map, cfi, cfi->device_type, NULL);
 
 	printk(KERN_INFO "%s: Found %d x%d devices at 0x%x in %d-bit mode\n",
 	       map->name, cfi->interleave, cfi->device_type*8, base,
@@ -139,7 +149,7 @@ static int cfi_chip_setup(struct map_info *map,
 	
 	memset(cfi->cfiq,0,sizeof(struct cfi_ident));	
 	
-	cfi->cfi_mode = 1;
+	cfi->cfi_mode = CFI_MODE_CFI;
 	cfi->fast_prog=1;		/* CFI supports fast programming */
 	
 	/* Read the CFI info structure */
@@ -171,7 +181,7 @@ static int cfi_chip_setup(struct map_info *map,
 #endif
 	}
 	/* Put it back into Read Mode */
-	cfi_send_gen_cmd(0xFF, 0, base, map, cfi, cfi->device_type, NULL);
+	cfi_send_gen_cmd(0xF0, 0, base, map, cfi, cfi->device_type, NULL);
 
 	return 1;
 }
@@ -250,11 +260,11 @@ static void print_cfi_ident(struct cfi_ident *cfip)
 	else
 		printk("Full buffer write not supported\n");
 	
-	printk("Typical block erase timeout: %d 탎\n", 1<<cfip->BlockEraseTimeoutTyp);
-	printk("Maximum block erase timeout: %d 탎\n", (1<<cfip->BlockEraseTimeoutMax) * (1<<cfip->BlockEraseTimeoutTyp));
+	printk("Typical block erase timeout: %d ms\n", 1<<cfip->BlockEraseTimeoutTyp);
+	printk("Maximum block erase timeout: %d ms\n", (1<<cfip->BlockEraseTimeoutMax) * (1<<cfip->BlockEraseTimeoutTyp));
 	if (cfip->ChipEraseTimeoutTyp || cfip->ChipEraseTimeoutMax) {
-		printk("Typical chip erase timeout: %d 탎\n", 1<<cfip->ChipEraseTimeoutTyp); 
-		printk("Maximum chip erase timeout: %d 탎\n", (1<<cfip->ChipEraseTimeoutMax) * (1<<cfip->ChipEraseTimeoutTyp));
+		printk("Typical chip erase timeout: %d ms\n", 1<<cfip->ChipEraseTimeoutTyp); 
+		printk("Maximum chip erase timeout: %d ms\n", (1<<cfip->ChipEraseTimeoutMax) * (1<<cfip->ChipEraseTimeoutTyp));
 	}
 	else
 		printk("Chip erase not supported\n");
