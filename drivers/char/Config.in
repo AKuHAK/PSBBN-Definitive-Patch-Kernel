@@ -8,6 +8,13 @@ bool 'Virtual terminal' CONFIG_VT
 if [ "$CONFIG_VT" = "y" ]; then
    bool '  Support for console on virtual terminal' CONFIG_VT_CONSOLE
 fi
+if [ "$CONFIG_SNSC" = "y" ]; then
+   bool 'Support for NULL console' CONFIG_NULL_CONSOLE 
+   if [ "$CONFIG_DUMMY_KEYB" = "y" ]; then
+       bool 'Support for keycodes translation in DUMMY KEYB driver' CONFIG_DUMMY_KEYB_TRANS_SCANCODES
+   fi
+fi
+
 tristate 'Standard/generic (8250/16550 and compatible UARTs) serial support' CONFIG_SERIAL
 if [ "$CONFIG_SERIAL" = "y" ]; then
    bool '  Support for console on serial port' CONFIG_SERIAL_CONSOLE
@@ -69,22 +76,6 @@ if [ "$CONFIG_SERIAL_NONSTANDARD" = "y" ]; then
      if [ "$CONFIG_AU1000_UART" = "y" ]; then
          bool '        Enable Au1000 serial console' CONFIG_AU1000_SERIAL_CONSOLE
      fi
-     dep_tristate '  Au1000 USB TTY Device support' CONFIG_AU1000_USB_TTY $CONFIG_AU1000_USB_DEVICE
-     if [ "$CONFIG_AU1000_USB_TTY" != "y" ]; then
-        dep_tristate '  Au1000 USB Raw Device support' CONFIG_AU1000_USB_RAW $CONFIG_AU1000_USB_DEVICE
-     fi
-    if [ "$CONFIG_CPU_TX4925" = "y" ]; then 
-      bool 'TX4925 serial support (via generic serial)' CONFIG_TX4925_SIO
-      if [ "$CONFIG_TX4925_SIO" = "y" ]; then 
-         bool '  Support serial console' CONFIG_TX4925_SIO_CONSOLE
-      fi      
-    fi
-    if [ "$CONFIG_CPU_TX4927" = "y" ]; then
-      bool 'TX4927 serial support (via generic serial)' CONFIG_TX4927_SIO
-      if [ "$CONFIG_TX4927_SIO" = "y" ]; then
-         bool '  Support serial console' CONFIG_TX4927_SIO_CONSOLE
-      fi
-    fi
      bool 'TXx927 SIO support' CONFIG_TXX927_SERIAL 
      if [ "$CONFIG_TXX927_SERIAL" = "y" ]; then
         bool 'TXx927 SIO Console support' CONFIG_TXX927_SERIAL_CONSOLE  
@@ -102,7 +93,7 @@ if [ "$CONFIG_SERIAL_NONSTANDARD" = "y" ]; then
      fi
    fi
 fi
-if [ "$CONFIG_MIPS_ITE8172" = "y" ]; then
+if [ "$CONFIG_MIPS_ITE8172" = "y" -o "$CONFIG_MIPS_SNSC_MPU210" = "y" ]; then
    bool 'Enable Qtronix 990P Keyboard Support' CONFIG_QTRONIX_KEYBOARD
    if [ "$CONFIG_QTRONIX_KEYBOARD" = "y" ]; then
      define_bool CONFIG_IT8172_CIR y
@@ -126,53 +117,29 @@ if [ "$CONFIG_VR4122" = "y" -o "$CONFIG_VR4131" = "y" ]; then
      bool '    Enable Touch Panel Interface Unit Support' CONFIG_VRC4173_PIU
    fi
 fi
+
+tristate 'Sony NSC keypad support' CONFIG_SNSC_KPAD
+if [ "$CONFIG_DRAGONBALL_SNSC_MPU110" = "y" ]; then
+    dep_tristate '  MPU-110 keypad support' CONFIG_SNSC_MPU110_KPAD $CONFIG_SNSC_KPAD
+fi
+
+if [ "$CONFIG_SNSC_MPU200" = "y" ]; then
+      bool 'MPU-200 KeyPad Support' CONFIG_SNSC_MPU200_KPAD
+      if [ "$CONFIG_SNSC_MPU200_KPAD" != "y" ]; then
+         bool 'PC Keyboard Support' CONFIG_PC_KEYB
+      fi
+fi
+
+if [ "$CONFIG_SNSC_MPU300" = "y" ]; then
+   tristate 'MPU-300 FAN control Support' CONFIG_SNSC_MPU300_FANCTL
+   tristate 'MPU-300 SuperIO GPIO Support' CONFIG_SNSC_MPU300_SIOGPIO
+   dep_tristate '  MPU-301 SuperIO GPIO keypad support' CONFIG_SNSC_MPU301_KPAD $CONFIG_SNSC_KPAD $CONFIG_SNSC_MPU300_SIOGPIO
+fi
+
 if [ "$CONFIG_EXPERIMENTAL" = "y" -a "$CONFIG_ZORRO" = "y" ]; then
    tristate 'Commodore A2232 serial support (EXPERIMENTAL)' CONFIG_A2232
 fi
-if [ "$CONFIG_GT64260" = "y" ]; then
-   bool 'GT64260 mpsc serial port support' CONFIG_GT64260_MPSC
-   if [ "$CONFIG_GT64260_MPSC" = "y" ]; then
-      bool '  MPSC Console support' CONFIG_GT64260_CONSOLE
-      if [ "$CONFIG_GT64260_CONSOLE" = "y" ]; then
-	 define_bool CONFIG_SERIAL_CONSOLE y
-	 choice 'Default console port' \
-	    "MPSC0		CONFIG_GT64260_CONSOLE_0 \
-	     MPSC1		CONFIG_GT64260_CONSOLE_1" MPSC0
-	 if [ "$CONFIG_USE_PPCBOOT" != "y" ]; then
-            int 'Serial Console Baudrate' CONFIG_SERIAL_CONSOLE_BAUD 115200
-	 fi
-         choice 'Baud Rate Generator Clock Source' \
-            "BCLKIN	CONFIG_GT64260_BCLKIN	\
-	     SCLK0	CONFIG_GT64260_SCLK0	\
-	     TSCLK0	CONFIG_GT64260_TSCLK0	\
-	     SCLK1	CONFIG_GT64260_SCLK1	\
-	     TSCLK1	CONFIG_GT64260_TSCLK1	\
-	     TCLK	CONFIG_GT64260_TCLK"	TCLK
-	 if [ "$CONFIG_GT64260_BCLKIN" = "y" ]; then
-	   define_int CONFIG_GT64260_CLKSRC	0
-	 fi
-	 if [ "$CONFIG_GT64260_SCLK0" = "y" ]; then
-	   define_int CONFIG_GT64260_CLKSRC	2
-	 fi
-	 if [ "$CONFIG_GT64260_TSCLK0" = "y" ]; then
-	   define_int CONFIG_GT64260_CLKSRC	3
-	 fi
-	 if [ "$CONFIG_GT64260_SCLK1" = "y" ]; then
-	   define_int CONFIG_GT64260_CLKSRC	6
-	 fi
-	 if [ "$CONFIG_GT64260_TSCLK1" = "y" ]; then
-	   define_int CONFIG_GT64260_CLKSRC	7
-	 fi
-	 if [ "$CONFIG_GT64260_TCLK" = "y" ]; then
-	   define_int CONFIG_GT64260_CLKSRC	8
-	 fi
-	 bool 'Clock rate is bus clock' CONFIG_GT64260_BRG_EQ_BUS
-	 if [ "$CONFIG_GT64260_BRG_EQ_BUS" = "n" ]; then
-	     int 'Input Clock Rate' CONFIG_GT64260_BRG_CLK_RATE 100000000 0 266666666
-	 fi
-      fi
-   fi
-fi
+
 if [ "$CONFIG_SERIAL" = "n" ]; then
    source drivers/serial/Config.in
 fi
@@ -236,6 +203,7 @@ fi
 endmenu
 
 source drivers/char/joystick/Config.in
+source drivers/char/akmem/Config.in
 
 tristate 'QIC-02 tape support' CONFIG_QIC02_TAPE
 if [ "$CONFIG_QIC02_TAPE" != "n" ]; then
@@ -282,12 +250,9 @@ if [ "$CONFIG_WATCHDOG" != "n" ]; then
       tristate '  IBM PPC 405 Watchdog Timer' CONFIG_PPC405_WDT
    fi
    dep_tristate '  NEC VR41xx Watchdog (DSU)' CONFIG_VR41XX_WDT $CONFIG_CPU_VR41XX
-   tristate '  Force CPCI735 watchdog' CONFIG_CPCI735_WATCHDOG
+   dep_tristate '  Dragonball MX1 Watchdog Timer' CONFIG_DBMX1_WDT $CONFIG_ARCH_DRAGONBALL
 fi
 endmenu
-
-tristate 'LED device driver support' CONFIG_LINUX_LED
-dep_tristate '  Force CPCI735 LED support' CONFIG_CPCI735_LED $CONFIG_LINUX_LED
 
 if [ "$CONFIG_ARCH_NETWINDER" = "y" ]; then
    tristate 'NetWinder thermometer support' CONFIG_DS1620
@@ -313,6 +278,9 @@ fi
 if [ "$CONFIG_ARCH_SA1100" = "y" ]; then
    tristate 'SA1100 Real Time Clock' CONFIG_SA1100_RTC
 fi
+if [ "$CONFIG_ARCH_DRAGONBALL" = "y" ]; then
+   tristate 'Dragonball RTC Support' CONFIG_SNSC_MPU110_RTC
+fi
 
 tristate 'Double Talk PC internal speech card support' CONFIG_DTLK
 tristate 'Siemens R3964 line discipline' CONFIG_R3964
@@ -320,8 +288,8 @@ tristate 'Applicom intelligent fieldbus card support' CONFIG_APPLICOM
 if [ "$CONFIG_EXPERIMENTAL" = "y" -a "$CONFIG_X86" = "y" ]; then
    dep_tristate 'Sony Vaio Programmable I/O Control Device support' CONFIG_SONYPI $CONFIG_PCI
 fi
-if [ "$CONFIG_IBM_OCP" = "y" ]; then
-   tristate 'IBM GPIO' CONFIG_IBM_OCP_GPIO
+if [ "$CONFIG_405GP" = "y" ]; then
+   tristate 'IBM PPC 405 GPIO' CONFIG_PPC405_GPIO
 fi
 
 mainmenu_option next_comment
@@ -351,16 +319,38 @@ fi
 if [ "$CONFIG_MIPS_AU1000" = "y" ]; then
    tristate ' Alchemy Au1000 GPIO device support' CONFIG_AU1000_GPIO
 fi
-if [ "$CONFIG_MIPS_ITE8172" = "y" ]; then
+if [ "$CONFIG_MIPS_ITE8172" = "y" -o "$CONFIG_MIPS_SNSC_MPU210" = "y" ]; then
   tristate ' ITE GPIO' CONFIG_ITE_GPIO
+fi
+if [ "$CONFIG_MIPS" = "y" -a "$CONFIG_CPU_HAS_LLSC" = "n" ]; then
+   tristate '  MIPS common fast test and set support' CONFIG_MIPS_TAS_DEV
 fi
 
 if [ "$CONFIG_X86" = "y" ]; then
    tristate 'ACP Modem (Mwave) support' CONFIG_MWAVE
+
+   if [ "$CONFIG_SNSC_MPU300" = "y" ]; then
+      tristate ' BU9929FV GPIO device support' CONFIG_SNSC_BU9929_GPIO
+        if [ "$CONFIG_SNSC_BU9929_GPIO" != "n" ]; then
+           bool '    enable I2C functions in interrupt time' CONFIG_SNSC_MPU300_INTRI2C
+        fi
+      tristate ' ICH2 GPIO device support' CONFIG_SNSC_ICH_GPIO
+      if [ "$CONFIG_SNSC_BU9929_GPIO" = "y" -a "$CONFIG_SNSC_ICH_GPIO" = "y" \
+	  -a "$CONFIG_I2C_I801" = "y" -a "$CONFIG_I2C" = "y" -a "$CONFIG_I2C_PROC" = "y" ]; then
+	 bool ' MPU-300 KeyPad Support' CONFIG_SNSC_MPU300_KPAD
+      fi
+   fi
 fi
 
-if [ "$CONFIG_XILINX_OCP" = "y" ]; then
-   tristate 'Xilinx on-chip GPIO' CONFIG_XILINX_GPIO
+if [ "$CONFIG_ARCH_DRAGONBALL" = "y" ]; then
+    dep_tristate 'DragonBall Generic GPIO' CONFIG_DRAGONBALL_GENERIC_GPIO $CONFIG_ARCH_DRAGONBALL
 fi
+if [ "$CONFIG_DRAGONBALL_SNSC_MPU110" = "y" ]; then
+    tristate 'MPU-110 PWM support' CONFIG_SNSC_MPU110_PWM
+fi
+if [ "$CONFIG_SNSC" = "y" -a "$CONFIG_PM" = "y" ]; then
+    tristate 'Sony NSC Power Management support' CONFIG_NPM
+fi
+
 
 endmenu

@@ -27,6 +27,7 @@
 #include <linux/iobuf.h>
 #include <linux/bootmem.h>
 #include <linux/tty.h>
+#include <linux/security.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -69,6 +70,12 @@ extern int irda_device_init(void);
 #include <asm/smp.h>
 #endif
 
+#if defined (CONFIG_ARCH_DRAGONBALL)
+extern void dragonball_init_regs(void);
+#include <asm/arch/mpu110_series.h>
+#include <asm/arch/misc.h>
+#endif
+
 /*
  * Versions of gcc older than that listed below may actually compile
  * and link okay, but the end product can have subtle run time bugs.
@@ -99,6 +106,12 @@ extern void free_initmem(void);
 
 #ifdef CONFIG_TC
 extern void tc_init(void);
+#endif
+#ifdef CONFIG_PS2
+extern void ps2_dev_init(void);
+#ifdef CONFIG_SNSC_CONST_LPJ
+static inline int lookup_lpj(void) { return 0x1df000; }
+#endif
 #endif
 
 extern void ecard_init(void);
@@ -270,10 +283,11 @@ static struct dev_name_struct {
 	{ "ftlb", 0x2c08 },
 	{ "ftlc", 0x2c10 },
 	{ "ftld", 0x2c18 },
-	{ "mtdblock", 0x1f00 },
-#if defined(CONFIG_XILINX_SYSACE)
-	{ "xsysacea",0x7d00 },
+#ifdef CONFIG_LTL
+#include <linux/snsc_major.h>
+	{ "ltl", (SNSC_LTL_MAJOR << MINORBITS) },
 #endif
+	{ "mtdblock", 0x1f00 },
 	{ NULL, 0 }
 };
 
@@ -316,12 +330,9 @@ static int __init root_dev_setup(char *line)
 
 __setup("root=", root_dev_setup);
 
-int __init checksetup(char *line)
+static int __init checksetup(char *line)
 {
 	struct kernel_param *p;
-
-	if (line == NULL)
-		return 0;
 
 	p = &__setup_start;
 	do {
@@ -349,6 +360,12 @@ void __init calibrate_delay(void)
 	unsigned long ticks, loopbit;
 	int lps_precision = LPS_PREC;
 
+#ifdef CONFIG_SNSC_CONST_LPJ
+        loops_per_jiffy = lookup_lpj();
+        if (loops_per_jiffy > 0) {
+                printk("Delay loop... ");
+        } else {
+#endif
 	loops_per_jiffy = (1<<12);
 
 	printk("Calibrating delay loop... ");
@@ -378,7 +395,9 @@ void __init calibrate_delay(void)
 		if (jiffies != ticks)	/* longer than 1 tick */
 			loops_per_jiffy &= ~loopbit;
 	}
-
+#ifdef CONFIG_SNSC_CONST_LPJ
+        }
+#endif
 /* Round the value and print it */	
 	printk("%lu.%02lu BogoMIPS\n",
 		loops_per_jiffy/(500000/HZ),
@@ -558,20 +577,36 @@ asmlinkage void __init start_kernel(void)
 	char * command_line;
 	unsigned long mempages;
 	extern char saved_command_line[];
+
+#if defined(CONFIG_ARCH_DRAGONBALL)
+        led_lit(0x4);
+#endif
 /*
  * Interrupts are still disabled. Do necessary setups, then
  * enable them
  */
 	lock_kernel();
 	printk(linux_banner);
+#if defined(CONFIG_ARCH_DRAGONBALL)
+        led_lit(0x5);
+#endif
 	setup_arch(&command_line);
+#if defined(CONFIG_ARCH_DRAGONBALL)
+        led_lit(0x40);
+#endif
 	printk("Kernel command line: %s\n", saved_command_line);
 	parse_options(command_line);
+#if defined (CONFIG_ARCH_DRAGONBALL)
+        dragonball_init_regs();
+#endif
 	trap_init();
 	init_IRQ();
 	sched_init();
 	softirq_init();
 	time_init();
+#if defined(CONFIG_ARCH_DRAGONBALL)
+        led_lit(0x50);
+#endif
 
 	/*
 	 * HACK ALERT! This is early. We're enabling the console before
@@ -579,6 +614,9 @@ asmlinkage void __init start_kernel(void)
 	 * this. But we do want output early, in case something goes wrong.
 	 */
 	console_init();
+#if defined(CONFIG_ARCH_DRAGONBALL)
+        led_lit(0x0);           // unlit all
+#endif
 #ifdef CONFIG_MODULES
 	init_modules();
 #endif
@@ -622,6 +660,7 @@ asmlinkage void __init start_kernel(void)
 
 	fork_init(mempages);
 	proc_caches_init();
+	security_scaffolding_startup();
 	vfs_caches_init(mempages);
 	buffer_init(mempages);
 	page_cache_init(mempages);
@@ -749,6 +788,9 @@ static void __init do_basic_setup(void)
 #ifdef CONFIG_TC
 	tc_init();
 #endif
+#ifdef CONFIG_PS2
+	ps2_dev_init();
+#endif
 
 	/* Networking initialization needs a process context */ 
 	sock_init();
@@ -841,7 +883,10 @@ static int init(void * unused)
 
 	(void) dup(0);
 	(void) dup(0);
-	
+#ifdef CONFIG_SNSC_MPU300_BOOT_TIME
+        boot_time_proc_init();
+#endif
+
 	/*
 	 * We try each of these until one succeeds.
 	 *

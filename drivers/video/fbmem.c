@@ -117,6 +117,8 @@ extern int sgivwfb_init(void);
 extern int sgivwfb_setup(char*);
 extern int rivafb_init(void);
 extern int rivafb_setup(char*);
+extern int i810fb_init(void);
+extern int i810fb_setup(char*);
 extern int tdfxfb_init(void);
 extern int tdfxfb_setup(char*);
 extern int sisfb_init(void);
@@ -130,8 +132,6 @@ extern int e1355fb_init(void);
 extern int e1355fb_setup(char*);
 extern int e1356fb_init(void);
 extern int e1356fb_setup(char*);
-extern int au1100fb_init(void);
-extern int au1100fb_setup(char*);
 extern int it8181fb_init(void);
 extern int it8181fb_setup(char*);
 extern int pvr2fb_init(void);
@@ -143,6 +143,8 @@ extern int sstfb_setup(char*);
 extern int anakinfb_init(void);
 extern int rpxfb_init(void);
 extern int rpxfb_setup(char*);
+extern int mpu110fb_init(void);
+extern int mpu110fb_setup(char*);
   
 static struct {
 	const char *name;
@@ -200,6 +202,9 @@ static struct {
 #endif
 #ifdef CONFIG_FB_RIVA
 	{ "riva", rivafb_init, rivafb_setup },
+#endif
+#ifdef CONFIG_FB_I810
+        { "i810fb", i810fb_init, i810fb_setup },
 #endif
 #ifdef CONFIG_FB_RADEON
 	{ "radeon", radeonfb_init, radeonfb_setup },
@@ -290,6 +295,9 @@ static struct {
 #ifdef CONFIG_FB_SA1100
 	{ "sa1100", sa1100fb_init, NULL },
 #endif
+#ifdef CONFIG_FB_MPU110
+	{ "mpu110", mpu110fb_init, mpu110fb_setup},
+#endif
 #ifdef CONFIG_FB_PXA
 	{ "pxa", pxafb_init, NULL },
 #endif
@@ -323,9 +331,6 @@ static struct {
 #ifdef CONFIG_FB_VOODOO1
 	{ "sst", sstfb_init, sstfb_setup },
 #endif
-#ifdef CONFIG_FB_AU1100
-	{ "au1100fb", au1100fb_init, au1100fb_setup },
-#endif 
 	/*
 	 * Generic drivers that don't use resource management (yet)
 	 */

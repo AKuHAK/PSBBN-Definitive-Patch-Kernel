@@ -25,6 +25,7 @@ obj-$(CONFIG_PROM_CONSOLE)        += promcon.o promcon_tbl.o
 obj-$(CONFIG_STI_CONSOLE)         += sticon.o sticon-bmode.o sticore.o
 obj-$(CONFIG_VGA_CONSOLE)         += vgacon.o
 obj-$(CONFIG_MDA_CONSOLE)         += mdacon.o
+obj-$(CONFIG_PS2_CONSOLE)         += ps2con.o ps2core.o fonts.o
 
 obj-$(CONFIG_FONT_SUN8x16)        += font_sun8x16.o
 obj-$(CONFIG_FONT_SUN12x22)       += font_sun12x22.o
@@ -36,6 +37,11 @@ obj-$(CONFIG_FONT_ACORN_8x8)      += font_acorn_8x8.o
 
 # Add fbmon.o back into obj-$(CONFIG_FB) in 2.5.x
 obj-$(CONFIG_FB)                  += fbmem.o fbcmap.o modedb.o fbcon.o fonts.o
+
+# for snsc wall paper
+obj-$(CONFIG_FBCON_WALLPAPER)	  += snsc_wp.o
+subdir-$(CONFIG_WALLPAPER_STATIC) += snsc_wpdata
+
 # Only include macmodes.o if we have FB support and are PPC
 ifeq ($(CONFIG_FB),y)
 obj-$(CONFIG_PPC)                 += macmodes.o
@@ -88,8 +94,6 @@ obj-$(CONFIG_FB_MAXINE)           += maxinefb.o
 obj-$(CONFIG_FB_TX3912)           += tx3912fb.o
 obj-$(CONFIG_FB_MQ200)		  += mq200fb.o	
 obj-$(CONFIG_FB_RPX)              += rpxfb.o
-obj-$(CONFIG_FB_AU1100)		  += au1100fb.o fbgen.o
-obj-$(CONFIG_FB_XILINX)           += xilinxfb.o fbgen.o
 
 subdir-$(CONFIG_FB_MATROX)	  += matrox
 ifeq ($(CONFIG_FB_MATROX),y)
@@ -111,6 +115,11 @@ ifeq ($(CONFIG_FB_ATY),y)
 obj-y				  += aty/atyfb.o
 endif
 
+subdir-$(CONFIG_FB_I810)	  += i810
+ifeq ($(CONFIG_FB_I810),y)
+obj-y				  += i810/i810fb.o
+endif
+
 obj-$(CONFIG_FB_SUN3)             += sun3fb.o
 obj-$(CONFIG_FB_BWTWO)            += bwtwofb.o
 obj-$(CONFIG_FB_HGA)              += hgafb.o  
@@ -124,6 +133,7 @@ obj-$(CONFIG_FB_IT8181)		  += it8181fb.o fbgen.o
 obj-$(CONFIG_FB_PVR2)             += pvr2fb.o
 obj-$(CONFIG_FB_VOODOO1)          += sstfb.o
 obj-$(CONFIG_FB_ANAKIN)           += anakinfb.o
+obj-$(CONFIG_FB_MPU110)		  += mpu110fb.o
 
 # Generic Low Level Drivers
 

@@ -24,8 +24,12 @@ obj-y	 += mem.o tty_io.o n_tty.o tty_ioctl.o raw.o pty.o misc.o random.o
 export-objs     :=	busmouse.o console.o keyboard.o sysrq.o \
 			misc.o pty.o random.o selection.o serial.o \
 			sonypi.o tty_io.o tty_ioctl.o generic_serial.o \
-			ibm_ocp_gpio.o au1000_gpio.o lcd.o led.o \
-			h3600_backpaq_fpga.o pfs168_spi.o rw4mouse.o
+			ppc405_gpio.o au1000_gpio.o mips_tas.o lcd.o \
+			h3600_backpaq_fpga.o pfs168_spi.o rw4mouse.o \
+			snsc_bu9929_gpio.o snsc_ich_gpio.o \
+			snsc_kpad.o \
+			snsc_mpu300_fanctl.o snsc_mpu300_siogpio.o \
+			ite_gpio.o
 
 mod-subdirs	:=	joystick ftape drm pcmcia
 
@@ -47,6 +51,10 @@ ifeq ($(ARCH),mips)
   ifneq ($(CONFIG_PC_KEYB),y)
     KEYBD    =
   endif
+  ifeq ($(CONFIG_SNSC_MPU200_KPAD),y)
+    KEYMAP   = snsc_mpu200_keymap.o
+    KEYBD    = snsc_mpu200_kpad.o
+  endif
 endif
 
 ifeq ($(ARCH),s390x)
@@ -54,12 +62,6 @@ ifeq ($(ARCH),s390x)
   KEYBD    =
   CONSOLE  =
   SERIAL   =
-endif
-
-ifeq ($(ARCH),xtensa)
-  ifneq ($(CONFIG_PC_KEYB),y)
-    KEYBD    =
-  endif
 endif
 
 ifeq ($(ARCH),m68k)
@@ -176,10 +178,16 @@ ifeq ($(CONFIG_QTRONIX_KEYBOARD),y)
   KEYMAP   = qtronixmap.o
 endif
 
+ifeq ($(CONFIG_SNSC_MPU300_KPAD),y)
+  KEYMAP   = snsc_mpu300_keymap.o
+  KEYBD    = snsc_mpu300_kpad.o
+endif
+
 ifeq ($(CONFIG_DUMMY_KEYB),y)
   KEYBD = dummy_keyb.o
 endif
 
+obj-$(CONFIG_NULL_CONSOLE) += null_console.o
 obj-$(CONFIG_VT) += vt.o vc_screen.o consolemap.o consolemap_deftbl.o $(CONSOLE) selection.o
 obj-$(CONFIG_SERIAL) += $(SERIAL)
 obj-$(CONFIG_SERIAL_ACPI) += acpi_serial.o
@@ -193,6 +201,10 @@ ifndef CONFIG_SUN_KEYBOARD
 else
   obj-$(CONFIG_PCI) += keyboard.o $(KEYMAP)
 endif
+
+obj-$(CONFIG_SNSC_KPAD) += snsc_kpad.o
+obj-$(CONFIG_SNSC_MPU110_KPAD) += snsc_mpu110_kpad.o
+obj-$(CONFIG_SNSC_MPU301_KPAD) += snsc_mpu301_kpad.o
 
 obj-$(CONFIG_MAGIC_SYSRQ) += sysrq.o
 obj-$(CONFIG_ATARI_DSP56K) += dsp56k.o
@@ -222,10 +234,9 @@ obj-$(CONFIG_MVME147_SCC) += generic_serial.o vme_scc.o
 obj-$(CONFIG_MVME162_SCC) += generic_serial.o vme_scc.o
 obj-$(CONFIG_BVME6000_SCC) += generic_serial.o vme_scc.o
 obj-$(CONFIG_SERIAL_TX3912) += generic_serial.o serial_tx3912.o
-obj-$(CONFIG_TX4925_SIO) += generic_serial.o tx4925_sio.o
-obj-$(CONFIG_TX4927_SIO) += generic_serial.o tx4927_sio.o
 obj-$(CONFIG_TXX927_SERIAL) += serial_txx927.o
-obj-$(CONFIG_GT64260_MPSC) += gt64260_mpsc.o
+obj-$(CONFIG_SNSC_MPU300_FANCTL) += snsc_mpu300_fanctl.o
+obj-$(CONFIG_SNSC_MPU300_SIOGPIO) += snsc_mpu300_siogpio.o
 
 subdir-$(CONFIG_RIO) += rio
 subdir-$(CONFIG_INPUT) += joystick
@@ -237,6 +248,9 @@ obj-$(CONFIG_PRINTER) += lp.o
 ifeq ($(CONFIG_INPUT),y)
 obj-y += joystick/js.o
 endif
+
+subdir-$(CONFIG_AKMEM)  += akmem
+obj-$(CONFIG_AKMEM)     += akmem/akmem.o
 
 obj-$(CONFIG_MAPLE_KEYBOARD) += maple_keyb.o
 obj-$(CONFIG_MAPLE_MOUSE) += maplemouse.o
@@ -253,10 +267,10 @@ obj-$(CONFIG_ATARIMOUSE) += atarimouse.o
 obj-$(CONFIG_ADBMOUSE) += adbmouse.o
 obj-$(CONFIG_PC110_PAD) += pc110pad.o
 obj-$(CONFIG_RTC) += rtc.o
-obj-$(CONFIG_RTC_DS1742) += rtc_ds1742.o
 obj-$(CONFIG_EFI_RTC) += efirtc.o
 obj-$(CONFIG_MIPS_RTC) += mips_rtc.o
 obj-$(CONFIG_SA1100_RTC) += sa1100-rtc.o
+obj-$(CONFIG_SNSC_MPU110_RTC) += snsc_mpu110_rtc.o
 ifeq ($(CONFIG_ALL_PPC),)
   obj-$(CONFIG_NVRAM) += nvram.o
 endif
@@ -266,22 +280,14 @@ obj-$(CONFIG_DS1620) += ds1620.o
 obj-$(CONFIG_INTEL_RNG) += i810_rng.o
 obj-$(CONFIG_ITE_GPIO) += ite_gpio.o
 obj-$(CONFIG_AU1000_GPIO) += au1000_gpio.o
-obj-$(CONFIG_AU1000_USB_TTY) += au1000_usbtty.o
-obj-$(CONFIG_AU1000_USB_RAW) += au1000_usbraw.o
-obj-$(CONFIG_IBM_OCP_GPIO) += ibm_ocp_gpio.o
+obj-$(CONFIG_MIPS_TAS_DEV) += mips_tas.o
 obj-$(CONFIG_PPC405_GPIO) += ppc405_gpio.o
 obj-$(CONFIG_RWMOUSE) += rw4mouse.o
-mod-subdirs     +=	xilinx_gpio
-subdir-$(CONFIG_XILINX_GPIO) += xilinx_gpio
-obj-$(CONFIG_XILINX_GPIO) += xilinx_gpio/xilinx_gpio.o
-ifeq ($(CONFIG_VIRTEX_II_PRO),y)
-  ifeq ($(CONFIG_VT),y)
-    ifeq ($(CONFIG_PC_KEYBOARD),y)
-      subdir-$(CONFIG_VT) += xilinx_keyb
-      obj-$(CONFIG_VT) += xilinx_keyb/xilinx_keyb.o
-    endif
-  endif
-endif
+obj-$(CONFIG_SNSC_BU9929_GPIO) += snsc_bu9929_gpio.o
+obj-$(CONFIG_SNSC_ICH_GPIO) += snsc_ich_gpio.o
+obj-$(CONFIG_SNSC_MPU110_PWM) += snsc_mpu110_pwm.o
+obj-$(CONFIG_DRAGONBALL_GENERIC_GPIO) += dragonball_generic_gpio.o
+obj-$(CONFIG_NPM) += npm.o
 
 obj-$(CONFIG_QIC02_TAPE) += tpqic02.o
 
@@ -323,10 +329,7 @@ obj-$(CONFIG_SA1100_WATCHDOG) += sa1100_wdt.o
 obj-$(CONFIG_SOFT_WATCHDOG) += softdog.o
 obj-$(CONFIG_PPC405_WDT)  += ppc405_wdt.o
 obj-$(CONFIG_VR41XX_WDT) += vr41xxwdt.o
-obj-$(CONFIG_CPCI735_WATCHDOG) += wdt_cpci735.o
-
-obj-$(CONFIG_LINUX_LED) += led.o
-obj-$(CONFIG_CPCI735_LED) += led_cpci735.o
+obj-$(CONFIG_DBMX1_WDT) += dbmx1_wdt.o
 
 subdir-$(CONFIG_MWAVE) += mwave
 ifeq ($(CONFIG_MWAVE),y)
@@ -369,3 +372,12 @@ defkeymap.c: defkeymap.map
 
 qtronixmap.c: qtronixmap.map
 	set -e ; loadkeys --mktable $< | sed -e 's/^static *//' > $@
+
+ifeq ($(CONFIG_SNSC_MPU200_KPAD),y)
+snsc_mpu200_keymap.c: snsc_mpu200_keymap.map
+	set -e ; loadkeys --mktable $< | sed -e 's/^static *//' > $@
+endif
+ifeq ($(CONFIG_SNSC_MPU300_KPAD),y)
+snsc_mpu300_keymap.c: snsc_mpu300_keymap.map
+	set -e ; loadkeys --mktable $< | sed -e 's/^static *//' > $@
+endif

@@ -155,6 +155,7 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/bitops.h>
+#include <asm/semaphore.h>
 
 #include "ide_modes.h"
 
@@ -277,7 +278,7 @@ static void ide_old_init_default_hwifs(void)
 		
 		base = ide_default_io_base(index);
 
-#if !defined(CONFIG_REDWOOD_4) & !defined(CONFIG_REDWOOD_5)  & !defined(CONFIG_REDWOOD_6) /* Redwood 4 has a base of 0x00000000 */
+#if !defined(CONFIG_REDWOOD_4) /* Redwood 4 has a base of 0x00000000 */
 		if (base)
 #endif
 		{
@@ -354,11 +355,8 @@ int drive_is_flashcard (ide_drive_t *drive)
 		 || !strncmp(id->model, "SunDisk SDCFB", 13)	/* SunDisk */
 		 || !strncmp(id->model, "HAGIWARA HPC", 12)	/* Hagiwara */
 		 || !strncmp(id->model, "LEXAR ATA_FLASH", 15)	/* Lexar */
-		 || !strncmp(id->model, "ATA_FLASH", 9)		/* Simple Tech */
-#ifdef CONFIG_POWERK2
-		 || strncmp(id->model, "IBM-DMDM-10", 11)	/* IBM microdrive */
-#endif /* CONFIG_POWERK2 */
-		) {
+		 || !strncmp(id->model, "ATA_FLASH", 9))	/* Simple Tech */
+		{
 			return 1;	/* yes, it is a flash memory card */
 		}
 	}
@@ -545,9 +543,6 @@ void atapi_output_bytes (ide_drive_t *drive, void *buffer, unsigned int bytecoun
 static inline int drive_is_ready (ide_drive_t *drive)
 {
 	byte stat = 0;
-#ifdef CONFIG_POWERK2
-	int count=0;
-#endif /* CONFIG_POWERK2 */
 	if (drive->waiting_for_dma)
 		return HWIF(drive)->dmaproc(ide_dma_test_irq, drive);
 #if 0
@@ -565,14 +560,7 @@ static inline int drive_is_ready (ide_drive_t *drive)
 		stat = GET_ALTSTAT();
 	else
 #endif /* CONFIG_IDEPCI_SHARE_IRQ */
-
-#ifdef CONFIG_POWERK2
-	do {
-#endif /* CONFIG_POWERK2 */
-	stat = GET_STAT();	 /* Note: this may clear a pending IRQ!! */
-#ifdef CONFIG_POWERK2
-	} while(stat&BUSY_STAT && count++ <10000000); /*usually needs 1-15000*/
-#endif /* CONFIG_POWERK2 */
+	stat = GET_STAT();	/* Note: this may clear a pending IRQ!! */
 
 	if (stat & BUSY_STAT)
 		return 0;	/* drive busy:  definitely not interrupting */
@@ -1905,14 +1893,19 @@ int ide_revalidate_disk (kdev_t i_rdev)
 	ide_hwgroup_t *hwgroup;
 	unsigned int p, major, minor;
 	long flags;
+	unsigned long old_start_sect[1 << PARTN_BITS];
+	unsigned long old_nr_sects[1 << PARTN_BITS];
+	struct gendisk *gd;
 
 	if ((drive = get_info_ptr(i_rdev)) == NULL)
+		return -ENODEV;
+	if ((gd = get_gendisk(i_rdev)) == NULL)
 		return -ENODEV;
 	major = MAJOR(i_rdev);
 	minor = drive->select.b.unit << PARTN_BITS;
 	hwgroup = HWGROUP(drive);
 	spin_lock_irqsave(&io_request_lock, flags);
-	if (drive->busy || (drive->usage > 1)) {
+	if (drive->busy) {
 		spin_unlock_irqrestore(&io_request_lock, flags);
 		return -EBUSY;
 	};
@@ -1920,17 +1913,49 @@ int ide_revalidate_disk (kdev_t i_rdev)
 	MOD_INC_USE_COUNT;
 	spin_unlock_irqrestore(&io_request_lock, flags);
 
-	for (p = 0; p < (1<<PARTN_BITS); ++p) {
+	down(gd->part_sem);
+	
+	for (p = 1; p < (1<<PARTN_BITS); ++p) {
+		old_start_sect[p] = old_nr_sects[p] = 0;
 		if (drive->part[p].nr_sects > 0) {
 			kdev_t devp = MKDEV(major, minor+p);
-			invalidate_device(devp, 1);
+			if (drive->part_usage[p]) {
+			    old_start_sect[p] = drive->part[p].start_sect;
+			    old_nr_sects[p] = drive->part[p].nr_sects;
+			} else {
+			    invalidate_device(devp, 1);
+			}
 		}
 		drive->part[p].start_sect = 0;
 		drive->part[p].nr_sects   = 0;
+
+		drive->part[p].nr_segs = 1;
+		if (drive->part[p].seg)
+			kfree(drive->part[p].seg);
+		drive->part[p].seg = NULL;
+		drive->part[p].hash_unit = 0;
+		if (drive->part[p].hash)
+			kfree(drive->part[p].hash);
+		drive->part[p].hash = NULL;
 	};
 
 	if (DRIVER(drive)->revalidate)
 		DRIVER(drive)->revalidate(drive);
+
+	up(gd->part_sem);
+
+	for (p = 1; p < (1<<PARTN_BITS); ++p) {
+		if (old_nr_sects[p]) {
+			if (drive->part[p].start_sect != old_start_sect[p] ||
+			    drive->part[p].nr_sects != old_nr_sects[p]) {
+				if (p)
+					printk("%s%d", drive->name, p);
+				else
+					printk("%s", drive->name);
+				printk(": Device is in use! Data in the partition may be corrupt.\n");
+			}
+		}
+	};
 
 	drive->busy = 0;
 	wake_up(&drive->wqueue);
@@ -2216,6 +2241,12 @@ void ide_unregister (unsigned int index)
 	gd = hwif->gd;
 	if (gd) {
 		del_gendisk(gd);
+		for (i = 0; i < gd->max_p; i++) {
+			if (gd->part[i].seg != NULL)
+				kfree(gd->part[i].seg);
+			if (gd->part[i].hash != NULL)
+				kfree(gd->part[i].hash);
+		}
 		kfree(gd->sizes);
 		kfree(gd->part);
 		if (gd->de_arr)
@@ -2614,12 +2645,16 @@ int ide_wait_cmd_task (ide_drive_t *drive, byte *buf)
  */
 void ide_delay_50ms (void)
 {
+#ifdef CONFIG_SNSC_IDE_DELAY1MS
+        mdelay(1);
+#else
 #ifndef CONFIG_BLK_DEV_IDECS
 	mdelay(50);
 #else
 	__set_current_state(TASK_UNINTERRUPTIBLE);
 	schedule_timeout(HZ/20);
 #endif /* CONFIG_BLK_DEV_IDECS */
+#endif /* CONFIG_SNSC_IDE_DELAY1MS */
 }
 
 int system_bus_clock (void)
@@ -2855,6 +2890,56 @@ static int ide_check_media_change (kdev_t i_rdev)
 	if (drive->driver != NULL)
 		return DRIVER(drive)->media_change(drive);
 	return 0;
+}
+
+static int ide_is_commandset_supported( ide_drive_t * drive, int commandflag)
+{
+        if ( !drive || !(drive->id))
+                return 0;
+
+        return ((drive->id->command_set_1 & commandflag) && 
+                (drive->id->command_set_1 != 0xffff) &&
+                (drive->id->command_set_1 != 0x0000));
+}
+
+static int ide_flush_hardwarebuf(kdev_t dev)
+{
+	unsigned char args[4] = {0xe7, 0,0,0};	// ATA command "FLUSH CACHE"
+	ide_drive_t *drive;
+	int ret;
+	unsigned long timeout = 80 * HZ;
+
+	if ((drive = get_info_ptr(dev)) == NULL)
+		return -ENODEV;
+        if (!ide_is_commandset_supported(drive, IDE_COMMANDSET_WRITECACHE)){
+                /* return -EPERM; */
+                /* if the hdd does not support flushcache, 
+                 * it is reasonable to say all is ok here.
+                 */
+                return 0;
+        }
+	timeout += jiffies;
+	
+	/*
+	 * Repeat 'FLUSH CACHE' ATA command until completed sucessfully 
+	 * or 80 sec elapsed.
+	 * Suppose a HDD with 2MB cache, 512 bytes/sector.
+	 * And it is usual that ATA HDD's maximum seektime is 15ms and, max latency 5ms.
+	 * So it takes 20ms to complete writing a sector at worst case.
+	 * Therefore, 2MB / 512 * 20ms nealy equals 80 sec.
+	 * ide_wait_cmd waits 5 secs if drive is busy(i.e. previous command is executing)
+	 * ant waits our command complation or 10 secs.
+	 */
+	while((ret = ide_wait_cmd(drive, args[0], args[1], args[2], args[3], args))) {
+		printk("retrying flush cache... %ld\n", jiffies);
+		if( 0 < (signed long)(jiffies - timeout)){
+			printk(" abandoned flush cache\n");
+			break;
+		}
+		args[0] = 0xe7;
+		args[1] = args[2] = args[3] = 0;
+	}
+	return ret;
 }
 
 void ide_fixstring (byte *s, const int bytecount, const int byteswap)
@@ -3436,6 +3521,12 @@ static void __init probe_for_hwifs (void)
 		buddha_init();
 	}
 #endif /* CONFIG_BLK_DEV_BUDDHA */
+#ifdef CONFIG_BLK_DEV_PS2_IDE
+	{
+		extern void ps2_ide_init(void);
+		ps2_ide_init();
+	}
+#endif /* CONFIG_BLK_DEV_PS2_IDE */
 #if defined(CONFIG_BLK_DEV_ISAPNP) && defined(CONFIG_ISAPNP)
 	{
 		extern void pnpide_init(int enable);
@@ -3686,7 +3777,8 @@ struct block_device_operations ide_fops[] = {{
 	release:		ide_release,
 	ioctl:			ide_ioctl,
 	check_media_change:	ide_check_media_change,
-	revalidate:		ide_revalidate_disk
+	revalidate:		ide_revalidate_disk,
+	flush_hardwarebuf: ide_flush_hardwarebuf
 }};
 
 EXPORT_SYMBOL(ide_hwifs);

@@ -16,6 +16,9 @@
 #include <linux/sched.h>
 #include <asm/uaccess.h>
 #include <linux/reiserfs_fs.h>
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK 
+#include <linux/ext2_fs.h> 
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK */ 
 #include <linux/smp_lock.h>
 #include <linux/locks.h>
 #include <linux/init.h>
@@ -488,7 +491,13 @@ static int parse_options (char * options, unsigned long * mount_options, unsigne
 	  	printk("reiserfs: hash option requires a value\n");
 		return 0 ;
 	    }
-	} else {
+	}
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK
+	else if (!strcmp (this_char, "suidimmu")) {
+	    set_bit (SUID_IMMUTABLE, mount_options);
+	}
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK */
+	else {
 	    printk ("reiserfs: Unrecognized mount option %s\n", this_char);
 	    return 0;
 	}
@@ -515,11 +524,43 @@ static int reiserfs_remount (struct super_block * s, int * flags, char * data)
   struct reiserfs_transaction_handle th ;
   unsigned long blocks;
   unsigned long mount_options = 0;
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK
+  int do_update_suidimmu;
+#endif
 
   rs = SB_DISK_SUPER_BLOCK (s);
 
   if (!parse_options(data, &mount_options, &blocks))
   	return 0;
+
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK
+    if (reiserfs_suid_immutable(s) && !capable(CAP_LINUX_IMMUTABLE))
+	return -EPERM;
+    do_update_suidimmu = 0;
+    if (test_bit(SUID_IMMUTABLE, &mount_options)) {
+      if (!capable(CAP_LINUX_IMMUTABLE))
+	return -EPERM;
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK_DEBUG
+	printk("reiserfs: suidimmu ON\n");
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK_DEBUG */
+      if (!reiserfs_suid_immutable(s))
+	do_update_suidimmu = 1;
+      set_bit(SUID_IMMUTABLE, &(s->u.reiserfs_sb.s_mount_opt));
+    } else {
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK_DEBUG
+	printk("reiserfs: suidimmu OFF\n");
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK_DEBUG */
+      if (reiserfs_suid_immutable(s))
+	do_update_suidimmu = 1;
+      clear_bit(SUID_IMMUTABLE, &(s->u.reiserfs_sb.s_mount_opt));
+    }
+
+    /*
+     * update S_IMMUTABLE bit on inode->i_flags
+     */
+    if (do_update_suidimmu)
+      update_suidimmu(s, reiserfs_suid_immutable(s));
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK */
 
 #define SET_OPT( opt, bits, super )					\
     if( ( bits ) & ( 1 << ( opt ) ) )					\
@@ -923,6 +964,14 @@ static struct super_block * reiserfs_read_super (struct super_block * s, void * 
     if (parse_options ((char *) data, &(s->u.reiserfs_sb.s_mount_opt), &blocks) == 0) {
 	return NULL;
     }
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK
+    if (reiserfs_suid_immutable(s) && !capable(CAP_LINUX_IMMUTABLE))
+	return NULL;
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK_DEBUG
+    if (reiserfs_suid_immutable(s))
+	printk("reiserfs: suidimmu\n");
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK_DEBUG */
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK */
 
     if (blocks) {
   	printk("reserfs: resize option for remount only\n");
