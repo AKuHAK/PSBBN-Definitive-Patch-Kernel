@@ -15,8 +15,9 @@
 
 #include <linux/config.h>
 #include <asm/io.h>
-#ifdef CONFIG_TOSHIBA_JMR3927
-#include <asm/jmr3927/jmr3927.h>
+
+#ifdef CONFIG_PS2
+#include <asm/ps2/ide.h>
 #endif
 
 #ifndef MAX_HWIFS
@@ -67,11 +68,15 @@ static __inline__ void ide_init_default_hwifs(void)
 #ifndef CONFIG_BLK_DEV_IDEPCI
 	hw_regs_t hw;
 	int index;
+	ide_ioreg_t base;
 
 	for(index = 0; index < MAX_HWIFS; index++) {
-		ide_init_hwif_ports(&hw, ide_default_io_base(index), 0, NULL);
-		hw.irq = ide_default_irq(ide_default_io_base(index));
-		ide_register_hw(&hw, NULL);
+		base = ide_default_io_base(index);
+		if (base) {
+			ide_init_hwif_ports(&hw, base, 0, NULL);
+			hw.irq = ide_default_irq(base);
+			ide_register_hw(&hw, NULL);
+		}
 	}
 #endif /* CONFIG_BLK_DEV_IDEPCI */
 }
@@ -126,58 +131,7 @@ static __inline__ void ide_release_region(ide_ioreg_t from,
 #undef  SUPPORT_VLB_SYNC
 #define SUPPORT_VLB_SYNC 0
 
-#if defined(__MIPSEB__) && !defined(JMR3927_INIT_INDIRECT_PCI)
-
-/* get rid of defs from io.h - ide has its private and conflicting versions */
-#ifdef insw
-#undef insw
-#endif
-#ifdef outsw
-#undef outsw
-#endif
-#ifdef insl
-#undef insl
-#endif
-#ifdef outsl
-#undef outsl
-#endif
-
-#define insw(port, addr, count) ide_insw(port, addr, count)
-#define insl(port, addr, count) ide_insl(port, addr, count)
-#define outsw(port, addr, count) ide_outsw(port, addr, count)
-#define outsl(port, addr, count) ide_outsl(port, addr, count)
-
-static inline void ide_insw(unsigned long port, void *addr, unsigned int count)
-{
-	while (count--) {
-		*(u16 *)addr = *(volatile u16 *)(mips_io_port_base + port);
-		addr += 2;
-	}
-}
-
-static inline void ide_outsw(unsigned long port, void *addr, unsigned int count)
-{
-	while (count--) {
-		*(volatile u16 *)(mips_io_port_base + (port)) = *(u16 *)addr;
-		addr += 2;
-	}
-}
-
-static inline void ide_insl(unsigned long port, void *addr, unsigned int count)
-{
-	while (count--) {
-		*(u32 *)addr = *(volatile u32 *)(mips_io_port_base + port);
-		addr += 4;
-	}
-}
-
-static inline void ide_outsl(unsigned long port, void *addr, unsigned int count)
-{
-	while (count--) {
-		*(volatile u32 *)(mips_io_port_base + (port)) = *(u32 *)addr;
-		addr += 4;
-	}
-}
+#if defined(__MIPSEB__)
 
 #define T_CHAR          (0x0000)        /* char:  don't touch  */
 #define T_SHORT         (0x4000)        /* short: 12 -> 21     */

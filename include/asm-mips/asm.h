@@ -16,6 +16,7 @@
 #ifndef	__ASM_ASM_H
 #define	__ASM_ASM_H
 
+#include <linux/config.h>
 #include <asm/sgidefs.h>
 
 #ifndef CAT
@@ -160,7 +161,7 @@ symbol		=	value
 /*
  * MIPS ISA IV/V movn/movz instructions and equivalents for older CPUs.
  */
-#if (_MIPS_ISA == _MIPS_ISA_MIPS1)
+#if (_MIPS_ISA == _MIPS_ISA_MIPS1) && !defined(CONFIG_CPU_R5900)
 #define MOVN(rd,rs,rt)                                  \
 		.set	push;				\
 		.set	noreorder;			\
@@ -176,7 +177,7 @@ symbol		=	value
 		.set	pop;				\
 9:
 #endif /* _MIPS_ISA == _MIPS_ISA_MIPS1 */
-#if (_MIPS_ISA == _MIPS_ISA_MIPS2) || (_MIPS_ISA == _MIPS_ISA_MIPS3)
+#if ((_MIPS_ISA == _MIPS_ISA_MIPS2) || (_MIPS_ISA == _MIPS_ISA_MIPS3)) && !defined(CONFIG_CPU_R5900)
 #define MOVN(rd,rs,rt)                                  \
 		.set	push;				\
 		.set	noreorder;			\
@@ -193,7 +194,7 @@ symbol		=	value
 9:
 #endif /* (_MIPS_ISA == _MIPS_ISA_MIPS2) || (_MIPS_ISA == _MIPS_ISA_MIPS3) */
 #if (_MIPS_ISA == _MIPS_ISA_MIPS4 ) || (_MIPS_ISA == _MIPS_ISA_MIPS5) || \
-    (_MIPS_ISA == _MIPS_ISA_MIPS64)
+    (_MIPS_ISA == _MIPS_ISA_MIPS64) || defined(CONFIG_CPU_R5900)
 #define MOVN(rd,rs,rt)                                  \
 		movn	rd,rs,rt
 #define MOVZ(rd,rs,rt)                                  \
@@ -203,13 +204,14 @@ symbol		=	value
 /*
  * Stack alignment
  */
-#if (_MIPS_ISA == _MIPS_ISA_MIPS1) || (_MIPS_ISA == _MIPS_ISA_MIPS2) || \
-    (_MIPS_ISA == _MIPS_ISA_MIPS32)
+#if ((_MIPS_ISA == _MIPS_ISA_MIPS1) || (_MIPS_ISA == _MIPS_ISA_MIPS2) || \
+    (_MIPS_ISA == _MIPS_ISA_MIPS32)) && !defined(CONFIG_CPU_R5900)
 #define ALSZ	7
 #define ALMASK	~7
 #endif
 #if (_MIPS_ISA == _MIPS_ISA_MIPS3) || (_MIPS_ISA == _MIPS_ISA_MIPS4) || \
-    (_MIPS_ISA == _MIPS_ISA_MIPS5) || (_MIPS_ISA == _MIPS_ISA_MIPS64)
+    (_MIPS_ISA == _MIPS_ISA_MIPS5) || (_MIPS_ISA == _MIPS_ISA_MIPS64) || \
+    defined(CONFIG_CPU_R5900)
 #define ALSZ	15
 #define ALMASK	~15
 #endif
@@ -385,5 +387,28 @@ symbol		=	value
 #endif
 
 #define SSNOP	sll zero, zero, 1
+
+/*
+ * R5900 needs sync.p instruction after mtc0.
+ */
+#ifdef CONFIG_CPU_R5900
+#define MTC0_asm(rt, rd)	\
+	.set	push;			\
+	.set	noreorder;		\
+	mtc0	rt,rd;			\
+	sync.p;				\
+	.set	pop
+#define MTC0_str(rt, rd)	\
+"	.set	push\n"			\
+"	.set	noreorder\n"		\
+"	mtc0	" #rt "," #rd "\n"	\
+"	sync.p\n"			\
+"	.set	pop\n\t"
+#else
+#define MTC0_asm(rt, rd)	\
+	mtc0	rt,rd
+#define MTC0_str(rt, rd)	\
+"	mtc0	" #rt "," #rd "\n"
+#endif
 
 #endif /* __ASM_ASM_H */

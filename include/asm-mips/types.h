@@ -1,4 +1,5 @@
-/*
+/* $Id: types.h,v 1.3 1999/08/18 23:37:50 ralf Exp $
+ *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
@@ -8,6 +9,7 @@
  */
 #ifndef _ASM_TYPES_H
 #define _ASM_TYPES_H
+#include <linux/config.h>
 
 typedef unsigned short umode_t;
 
@@ -37,6 +39,11 @@ typedef __signed__ long long __s64;
 typedef unsigned long long __u64;
 #endif
  
+#endif
+
+#ifdef CONFIG_CPU_R5900
+typedef __signed__ int __s128 __attribute__((mode(TI)));
+typedef unsigned int __u128 __attribute__((mode(TI)));
 #endif
 
 /*
@@ -69,14 +76,12 @@ typedef unsigned long long u64;
 
 #define BITS_PER_LONG _MIPS_SZLONG
 
-typedef u32 dma_addr_t;
-typedef u64 dma64_addr_t;
-
-#ifdef CONFIG_64BIT_PHYS_ADDR
-typedef unsigned long long phys_t;
-#else
-typedef unsigned long phys_t;
+#ifdef CONFIG_CPU_R5900
+typedef __signed__ int s128 __attribute__((mode(TI)));
+typedef unsigned int u128 __attribute__((mode(TI)));
 #endif
+
+typedef unsigned long dma_addr_t;
 
 #endif /* __KERNEL__ */
 

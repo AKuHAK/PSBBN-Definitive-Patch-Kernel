@@ -610,6 +610,8 @@ void pci_announce_device_to_drivers(struct pci_dev *);
 unsigned int pci_do_scan_bus(struct pci_bus *bus);
 struct pci_bus * pci_add_new_bus(struct pci_bus *parent, struct pci_dev *dev, int busnr);
 
+#endif /* CONFIG_PCI */
+
 /* kmem_cache style wrapper around pci_alloc_consistent() */
 struct pci_pool *pci_pool_create (const char *name, struct pci_dev *dev,
 		size_t size, size_t align, size_t allocation, int flags);
@@ -617,8 +619,6 @@ void pci_pool_destroy (struct pci_pool *pool);
 
 void *pci_pool_alloc (struct pci_pool *pool, int flags, dma_addr_t *handle);
 void pci_pool_free (struct pci_pool *pool, void *vaddr, dma_addr_t addr);
-
-#endif /* CONFIG_PCI */
 
 /* Include architecture-dependent settings and functions */
 

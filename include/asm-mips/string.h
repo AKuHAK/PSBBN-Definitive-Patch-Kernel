@@ -19,11 +19,27 @@ extern __inline__ char *strcpy(char *__dest, __const__ char *__src)
   __asm__ __volatile__(
 	".set\tnoreorder\n\t"
 	".set\tnoat\n"
+#ifdef CONFIG_CPU_R5900	/* inhibit short loop */
+     "1:\n\t"
+	"lbu\t$1,(%1)\n\t"
+	"addiu\t%1,1\n\t"
+	"sb\t$1,(%0)\n\t"
+	"beqz\t$1,2f\n\t"
+	"addiu\t%0,1\n\t"
+	""
+	"lbu\t$1,(%1)\n\t"
+	"addiu\t%1,1\n\t"
+	"sb\t$1,(%0)\n\t"
+	"bnez\t$1,1b\n\t"
+	"addiu\t%0,1\n\t"
+     "2:\n\t"
+#else
 	"1:\tlbu\t$1,(%1)\n\t"
 	"addiu\t%1,1\n\t"
 	"sb\t$1,(%0)\n\t"
 	"bnez\t$1,1b\n\t"
 	"addiu\t%0,1\n\t"
+#endif
 	".set\tat\n\t"
 	".set\treorder"
 	: "=r" (__dest), "=r" (__src)
@@ -58,7 +74,7 @@ extern __inline__ char *strncpy(char *__dest, __const__ char *__src, size_t __n)
         : "0" (__dest), "1" (__src), "2" (__n)
         : "memory");
 
-  return __dest;
+  return __xdest;
 }
 
 #define __HAVE_ARCH_STRCMP

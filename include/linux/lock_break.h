@@ -29,6 +29,9 @@
 
 #define conditional_schedule_needed() (unlikely(current->need_resched))
 
+#define conditional_schedule_needed_and_preemptable(n)	\
+	(conditional_schedule_needed() && current->preempt_count == n)
+
 /*
  * setting the task's state to TASK_RUNNING is nothing but paranoia,
  * in the case where a task is delinquent in properly putting itself
@@ -73,6 +76,7 @@
 #define unconditional_schedule()
 #define conditional_schedule()
 #define conditional_schedule_needed() 0
+#define conditional_schedule_needed_and_preemptable(n) 0
 #define break_spin_lock(n)
 #define break_spin_lock_and_resched(n)
 #define debug_lock_break(n)

@@ -44,7 +44,6 @@ extern void r3081_wait(void);
 extern void r39xx_wait(void);
 extern void r4k_wait(void);
 extern void sr7100_wait(void);
-extern void au1k_wait(void);
 
 extern struct cpuinfo_mips cpu_data[];
 extern unsigned int vced_count, vcei_count;
@@ -98,6 +97,9 @@ extern struct task_struct *last_task_used_math;
 struct mips_fpu_hard_struct {
 	double fp_regs[NUM_FPU_REGS];
 	unsigned int control;
+#ifdef CONFIG_CPU_R5900_CONTEXT
+	unsigned long fp_acc;
+#endif
 };
 
 /*
@@ -197,6 +199,9 @@ extern int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
 /*
  * Return saved PC of a blocked thread.
  */
+#ifdef CONFIG_MIPS_STACKTRACE
+extern unsigned long thread_saved_pc(struct thread_struct *t);
+#else
 static inline unsigned long thread_saved_pc(struct thread_struct *t)
 {
 	extern void ret_from_fork(void);
@@ -205,8 +210,9 @@ static inline unsigned long thread_saved_pc(struct thread_struct *t)
 	if (t->reg31 == (unsigned long) ret_from_fork)
 		return t->reg31;
 
-	return ((unsigned long *)t->reg29)[13];
+	return ((unsigned long *)t->reg29)[10];
 }
+#endif
 
 /*
  * Do necessary setup to start up a newly executed thread.
@@ -215,7 +221,7 @@ static inline unsigned long thread_saved_pc(struct thread_struct *t)
 	/* New thread loses kernel and FPU privileges. */	       	\
 	regs->cp0_status = (regs->cp0_status & ~(ST0_CU0|ST0_KSU|ST0_CU1)) | KU_USER;\
 	regs->cp0_epc = new_pc;						\
-	regs->regs[29] = new_sp;					\
+	set_gpreg(regs, 29, new_sp);					\
 	current->thread.current_ds = USER_DS;				\
 } while (0)
 

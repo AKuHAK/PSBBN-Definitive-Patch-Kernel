@@ -54,13 +54,6 @@ static inline void pcibios_penalize_isa_irq(int irq)
 #define PCIBIOS_MIN_MEM		0x1000000
 #endif
 
-#ifdef CONFIG_TOSHIBA_RBTX4927
-#undef PCIBIOS_MIN_IO
-#undef PCIBIOS_MIN_MEM
-#define PCIBIOS_MIN_IO		0x1000
-#define PCIBIOS_MIN_MEM         0x1000000
-#endif
-
 struct pci_dev;
 
 /*
@@ -86,6 +79,7 @@ extern void *pci_alloc_consistent(struct pci_dev *hwdev, size_t size,
 extern void pci_free_consistent(struct pci_dev *hwdev, size_t size,
 				void *vaddr, dma_addr_t dma_handle);
 
+#if !defined(CONFIG_PS2)
 /*
  * Map a single buffer of the indicated size for DMA in streaming mode.
  * The 32-bit bus address to use is returned.
@@ -122,6 +116,12 @@ static inline void pci_unmap_single(struct pci_dev *hwdev, dma_addr_t dma_addr,
 
 	/* Nothing to do */
 }
+#else /* !CONFIG_PS2 */
+extern dma_addr_t pci_map_single(struct pci_dev *hwdev, void *ptr,
+				 size_t size, int direction);
+extern void pci_unmap_single(struct pci_dev *hwdev, dma_addr_t dma_addr,
+			     size_t size, int direction);
+#endif /* !CONFIG_PS2 */
 
 /*
  * pci_{map,unmap}_single_page maps a kernel page to a dma_addr_t. identical

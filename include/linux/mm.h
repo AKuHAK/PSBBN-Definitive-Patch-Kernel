@@ -304,6 +304,7 @@ typedef struct page {
 #define SetPageChecked(page)	set_bit(PG_checked, &(page)->flags)
 #define PageLaunder(page)	test_bit(PG_launder, &(page)->flags)
 #define SetPageLaunder(page)	set_bit(PG_launder, &(page)->flags)
+#define DelallocPage(page)	((page)->buffers && test_bit(BH_Delay, &(page)->buffers->b_state))
 
 extern void FASTCALL(set_page_dirty(struct page *));
 
@@ -395,6 +396,8 @@ extern void FASTCALL(free_pages(unsigned long addr, unsigned int order));
 
 #define __free_page(page) __free_pages((page), 0)
 #define free_page(addr) free_pages((addr),0)
+
+extern int start_aggressive_readahead(int);
 
 extern void show_free_areas(void);
 extern void show_free_areas_node(pg_data_t *pgdat);

@@ -389,6 +389,7 @@ typedef struct ide_drive_s {
 	byte		dn;		/* now wide spread use */
 	unsigned int	failures;	/* current failure count */
 	unsigned int	max_failures;	/* maximum allowed failure count */
+	byte		part_usage[1<<PARTN_BITS];	/* open count for each partition */
 } ide_drive_t;
 
 /*

@@ -462,6 +462,10 @@ struct reiserfs_sb_info
 #define FORCE_RUPASOV_HASH 7  /* try to force rupasov hash on mount */
 #define FORCE_R5_HASH 8       /* try to force rupasov hash on mount */
 #define FORCE_HASH_DETECT 9   /* try to detect hash function on mount */
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK
+#define SUID_IMMUTABLE 10     /* -o suidimmu: treate files with suid flag
+				 as immutable */
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK */
 
 
 /* used for testing experimental features, makes benchmarking new
@@ -482,6 +486,9 @@ struct reiserfs_sb_info
 #define reiserfs_rupasov_hash(s) ((s)->u.reiserfs_sb.s_mount_opt & (1 << FORCE_RUPASOV_HASH))
 #define reiserfs_tea_hash(s) ((s)->u.reiserfs_sb.s_mount_opt & (1 << FORCE_TEA_HASH))
 #define reiserfs_hash_detect(s) ((s)->u.reiserfs_sb.s_mount_opt & (1 << FORCE_HASH_DETECT))
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK
+#define reiserfs_suid_immutable(s) ((s)->u.reiserfs_sb.s_mount_opt & (1 << SUID_IMMUTABLE))
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK */
 #define reiserfs_no_border(s) ((s)->u.reiserfs_sb.s_mount_opt & (1 << REISERFS_NO_BORDER))
 #define reiserfs_no_unhashed_relocation(s) ((s)->u.reiserfs_sb.s_mount_opt & (1 << REISERFS_NO_UNHASHED_RELOCATION))
 #define reiserfs_hashed_relocation(s) ((s)->u.reiserfs_sb.s_mount_opt & (1 << REISERFS_HASHED_RELOCATION))

@@ -164,9 +164,6 @@ typedef struct _trace_trap_entry
            trace_event(TRACE_EV_TRAP_ENTRY, &trap_event);\
 	   } while(0);
 
-/*  TRACE_TRAP_EXIT */
-#define TRACE_TRAP_EXIT()  trace_event(TRACE_EV_TRAP_EXIT, NULL)
-
 /*  TRACE_IRQ_ENTRY */
 typedef struct _trace_irq_entry
 {
@@ -181,9 +178,6 @@ typedef struct _trace_irq_entry
            irq_entry.kernel = KERNEL;\
            trace_event(TRACE_EV_IRQ_ENTRY, &irq_entry);\
            } while(0);
-
-/*  TRACE_IRQ_EXIT */
-#define TRACE_IRQ_EXIT()  trace_event(TRACE_EV_IRQ_EXIT, NULL)
 
 /*  TRACE_SCHEDCHANGE */ 
 typedef struct _trace_schedchange
@@ -407,9 +401,7 @@ typedef struct _trace_change_mask
 #else /* Kernel is configured without tracing */
 #define TRACE_EVENT(ID, DATA)
 #define TRACE_TRAP_ENTRY(ID, EIP)
-#define TRACE_TRAP_EXIT()
 #define TRACE_IRQ_ENTRY(ID, KERNEL)
-#define TRACE_IRQ_EXIT()
 #define TRACE_SCHEDCHANGE(OUT, IN, OUT_STATE)
 #define TRACE_SOFT_IRQ(ID, DATA)
 #define TRACE_PROCESS(ID, DATA1, DATA2)

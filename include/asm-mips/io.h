@@ -19,6 +19,10 @@
 #ifdef CONFIG_TOSHIBA_JMR3927
 #include <asm/jmr3927/jmr3927.h>
 #endif
+#if defined(CONFIG_MIPS_SNSC_MPU210) && defined(CONFIG_ISA)
+#include <asm/it8172/it8172.h>
+#include <asm/it8172/snsc_mpu210.h>
+#endif
 
 /*
  * Slowdown I/O port space accesses for antique hardware.
@@ -95,6 +99,11 @@ extern const unsigned long mips_io_port_base;
 #define SLOW_DOWN_IO
 #endif
 
+#ifdef CONFIG_PS2
+#undef SLOW_DOWN_IO
+#define SLOW_DOWN_IO __asm__ __volatile__("sync");
+#endif
+
 /*
  * Change virtual addresses to physical addresses and vv.
  * These are trivial on the 1:1 Linux/MIPS mapping
@@ -135,16 +144,17 @@ extern unsigned long isa_slot_offset;
  */
 #define page_to_phys(page)	((page - mem_map) << PAGE_SHIFT)
 
-extern void * __ioremap(phys_t offset, phys_t size, unsigned long flags);
+extern void * __ioremap(unsigned long offset, unsigned long size, unsigned long flags);
 
-#define ioremap(offset, size)						\
-	__ioremap((offset), (size), _CACHE_UNCACHED)
-#define ioremap_nocache(offset, size)					\
-	__ioremap((offset), (size), _CACHE_UNCACHED)
-#define ioremap_cacheable_cow(offset, size)				\
-	__ioremap((offset), (size), _CACHE_CACHABLE_COW)
-#define ioremap_uncached_accelerated(offset, size)			\
-	__ioremap((offset), (size), _CACHE_UNCACHED_ACCELERATED)
+static inline void *ioremap(unsigned long offset, unsigned long size)
+{
+	return __ioremap(offset, size, _CACHE_UNCACHED);
+}
+
+static inline void *ioremap_nocache(unsigned long offset, unsigned long size)
+{
+	return __ioremap(offset, size, _CACHE_UNCACHED);
+}
 
 extern void iounmap(void *addr);
 
@@ -154,25 +164,25 @@ extern void iounmap(void *addr);
  * XXX more SNI hacks.
  */
 #ifdef  JMR3927_INIT_INDIRECT_PCI
-extern unsigned char tx_ioinb(unsigned char *addr);
-extern void tx_iooutb(unsigned long data, unsigned char *addr);
-extern unsigned short tx_ioinw(unsigned short *addr);
-extern void tx_iooutw(unsigned long data, unsigned short *addr);
-extern unsigned long tx_ioinl(unsigned int *addr);
-extern void tx_iooutl(unsigned long data, unsigned int *addr);
-extern void tx_insbyte(unsigned char *addr,void *buffer,unsigned int count);
-extern void tx_insword(unsigned short *addr,void *buffer,unsigned int count);
-extern void tx_inslong(unsigned int *addr,void *buffer,unsigned int count);
-extern void tx_outsbyte(unsigned char *addr,void *buffer,unsigned int count);
-extern void tx_outsword(unsigned short *addr,void *buffer,unsigned int count);
-extern void tx_outslong(unsigned int *addr,void *buffer,unsigned int count);
+unsigned char tx_ioinb(unsigned char *addr);
+void tx_iooutb(unsigned long data, unsigned char *addr);
+unsigned short tx_ioinw(unsigned short *addr);
+void tx_iooutw(unsigned long data, unsigned short *addr);
+unsigned long tx_ioinl(unsigned int *addr);
+void tx_iooutl(unsigned long data, unsigned int *addr);
+void tx_insbyte(unsigned char *addr,void *buffer,unsigned int count);
+void tx_insword(unsigned short *addr,void *buffer,unsigned int count);
+void tx_inslong(unsigned int *addr,void *buffer,unsigned int count);
+void tx_outsbyte(unsigned char *addr,void *buffer,unsigned int count);
+void tx_outsword(unsigned short *addr,void *buffer,unsigned int count);
+void tx_outslong(unsigned int *addr,void *buffer,unsigned int count);
 
-extern unsigned char tx_readb(unsigned char *addr);
-extern void tx_writeb(unsigned long data, unsigned char *addr);
-extern unsigned short tx_readw(unsigned short *addr);
-extern void tx_writew(unsigned long data, unsigned short *addr);
-extern unsigned long tx_readl(unsigned int *addr);
-extern void tx_writel(unsigned long data, unsigned int *addr);
+unsigned char tx_readb(unsigned char *addr);
+void tx_writeb(unsigned long data, unsigned char *addr);
+unsigned short tx_readw(unsigned short *addr);
+void tx_writew(unsigned long data, unsigned short *addr);
+unsigned long tx_readl(unsigned int *addr);
+void tx_writel(unsigned long data, unsigned int *addr);
 
 #define readb(addr)             (unsigned char)tx_readb((unsigned char *)(addr))
 #define readw(addr)             (unsigned short)tx_readw((unsigned short *)(addr))  
@@ -282,160 +292,259 @@ out:
 #define outsl(port,addr,count) tx_outslong((unsigned short *)(port),addr,count)
 #define insl(port,addr,count)  tx_inslong((unsigned short *)(port),addr,count)
 
-static inline void std_outb(unsigned char val, unsigned long port)
-{
-	*(volatile u8 *)(mips_io_port_base + (port)) = __ioswab8(val);
-} 
+#define std_outb(val,port)							\
+do {									\
+	*(volatile u8 *)(mips_io_port_base + (port)) = __ioswab8(val);	\
+} while(0)
 
-static inline void std_outw(unsigned short val, unsigned long port)
-{
-	*(volatile u16 *)(mips_io_port_base + (port)) = __ioswab16(val);
-}
+#define std_outw(val,port)							\
+do {									\
+	*(volatile u16 *)(mips_io_port_base + (port)) = __ioswab16(val);	\
+} while(0)
 
-static inline void std_outl(unsigned long val, unsigned long port)
-{
-	*(volatile u32 *)(mips_io_port_base + (port)) = __ioswab32(val);
-}
+#define std_outl(val,port)							\
+do {									\
+	*(volatile u32 *)(mips_io_port_base + (port)) = __ioswab32(val);\
+} while(0)
 
-static inline void std_outb_p(unsigned char val, unsigned long port)
-{
-	*(volatile u8 *)(mips_io_port_base + (port)) = __ioswab8(val);
-	SLOW_DOWN_IO;
-}
+#define std_outb_p(val,port)						\
+do {									\
+	*(volatile u8 *)(mips_io_port_base + (port)) = __ioswab8(val);	\
+	SLOW_DOWN_IO;							\
+} while(0)
 
-static inline void std_outw_p(unsigned short val, unsigned long port)
-{
-	*(volatile u16 *)(mips_io_port_base + (port)) = __ioswab16(val);
-	SLOW_DOWN_IO;
-}
+#define std_outw_p(val,port)						\
+do {									\
+	*(volatile u16 *)(mips_io_port_base + (port)) = __ioswab16(val);\
+	SLOW_DOWN_IO;							\
+} while(0)
 
-static inline void std_outl_p(unsigned long val, unsigned long port)
-{
-	*(volatile u32 *)(mips_io_port_base + (port)) = __ioswab32(val);
-	SLOW_DOWN_IO;
-}
+#define std_outl_p(val,port)						\
+do {									\
+	*(volatile u32 *)(mips_io_port_base + (port)) = __ioswab32(val);\
+	SLOW_DOWN_IO;							\
+} while(0)
 
-static inline unsigned char std_inb(unsigned long port)
-{
-	return __ioswab8(*(volatile u8 *)(mips_io_port_base + port));
-}
+#define std_inb(port) (__ioswab8(*(volatile u8 *)(mips_io_port_base + (port))))
+#define std_inw(port) (__ioswab16(*(volatile u16 *)(mips_io_port_base + (port))))
+#define std_inl(port) (__ioswab32(*(volatile u32 *)(mips_io_port_base + (port))))
 
-static inline unsigned short std_inw(unsigned long port)
-{
-	return __ioswab16(*(volatile u16 *)(mips_io_port_base + port));
-}
+#define std_inb_p(port)							\
+({									\
+	u8 __val;							\
+									\
+	__val = *(volatile u8 *)(mips_io_port_base + (port));		\
+	SLOW_DOWN_IO;							\
+	__ioswab8(__val);						\
+})
 
-static inline unsigned int std_inl(unsigned long port)
-{
-	return __ioswab32(*(volatile u32 *)(mips_io_port_base + port));
-}
+#define std_inw_p(port)							\
+({									\
+	u16 __val;							\
+									\
+	__val = *(volatile u16 *)(mips_io_port_base + (port));		\
+	SLOW_DOWN_IO;							\
+	__ioswab16(__val);						\
+})
 
-static inline unsigned char std_inb_p(unsigned long port)
-{
-	u8 __val;
+#define std_inl_p(port)							\
+({									\
+	u32 __val;							\
+									\
+	__val = *(volatile u32 *)(mips_io_port_base + (port));		\
+	SLOW_DOWN_IO;							\
+	__ioswab32(__val);						\
+})
 
-	__val = *(volatile u8 *)(mips_io_port_base + port);
-	SLOW_DOWN_IO;
-
-	return __ioswab8(__val);
-}
-
-static inline unsigned short std_inw_p(unsigned long port)
-{
-	u16 __val;
-
-	__val = *(volatile u16 *)(mips_io_port_base + port);
-	SLOW_DOWN_IO;
-
-	return __ioswab16(__val);
-}
-
-static inline unsigned int std_inl_p(unsigned long port)
-{
-	u32 __val;
-
-	__val = *(volatile u32 *)(mips_io_port_base + port);
-	SLOW_DOWN_IO;
-	return __ioswab32(__val);
-}
 #else /* JMR3927_INIT_INDIRECT_PCI */
 
-static inline void outb(unsigned char val, unsigned long port)
-{
-	*(volatile u8 *)(mips_io_port_base + (port)) = __ioswab8(val);
-} 
+#if defined(CONFIG_MIPS_SNSC_MPU210) && defined(CONFIG_ISA)
+/* For 16-bit PC Card support */
 
-static inline void outw(unsigned short val, unsigned long port)
-{
-	*(volatile u16 *)(mips_io_port_base + (port)) = __ioswab16(val);
+#define outb(val,port)							\
+do {									\
+	unsigned long __p = (port);					\
+									\
+	if (__p <= 0xffff)						\
+		__p += KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS);	\
+	else								\
+		__p += mips_io_port_base;				\
+	*(volatile u8 *)__p = __ioswab8(val);				\
+} while(0)
+
+#define outw(val,port)							\
+do {									\
+	unsigned long __p = (port);					\
+									\
+	if (__p <= 0xffff)						\
+		__p += KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS);	\
+	else								\
+		__p += mips_io_port_base;				\
+	*(volatile u16 *)__p = __ioswab16(val);				\
+} while(0)
+
+#define outl(val,port)							\
+do {									\
+	unsigned long __p = (port);					\
+									\
+	if (__p <= 0xffff)						\
+		__p += KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS);	\
+	else								\
+		__p += mips_io_port_base;				\
+	*(volatile u32 *)__p = __ioswab32(val);				\
+} while(0)
+
+#define outb_p(val,port)						\
+do {									\
+	unsigned long __p = (port);					\
+									\
+	if (__p <= 0xffff)						\
+		__p += KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS);	\
+	else								\
+		__p += mips_io_port_base;				\
+	*(volatile u8 *)__p = __ioswab8(val);				\
+	SLOW_DOWN_IO;							\
+} while(0)
+
+#define outw_p(val,port)						\
+do {									\
+	unsigned long __p = (port);					\
+									\
+	if (__p <= 0xffff)						\
+		__p += KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS);	\
+	else								\
+		__p += mips_io_port_base;				\
+	*(volatile u16 *)__p = __ioswab16(val);				\
+	SLOW_DOWN_IO;							\
+} while(0)
+
+#define outl_p(val,port)						\
+do {									\
+	unsigned long __p = (port);					\
+									\
+	if (__p <= 0xffff)						\
+		__p += KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS);	\
+	else								\
+		__p += mips_io_port_base;				\
+	*(volatile u32 *)__p = __ioswab32(val);				\
+	SLOW_DOWN_IO;							\
+} while(0)
+
+static inline u8 inb(unsigned long port) {
+	return(__ioswab8(*(volatile u8 *)((port <= 0xffff) ?
+		(port + KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS)) :
+		(port + mips_io_port_base))));
 }
 
-static inline void outl(unsigned long val, unsigned long port)
-{
-	*(volatile u32 *)(mips_io_port_base + (port)) = __ioswab32(val);
+static inline u16 inw(unsigned long port) {
+	return(__ioswab16(*(volatile u16 *)((port <= 0xffff) ?
+		(port + KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS)) :
+		(port + mips_io_port_base))));
 }
 
-static inline void outb_p(unsigned char val, unsigned long port)
-{
-	*(volatile u8 *)(mips_io_port_base + (port)) = __ioswab8(val);
+static inline u32 inl(unsigned long port) {
+	return(__ioswab32(*(volatile u32 *)((port <= 0xffff) ?
+		(port + KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS)) :
+		(port + mips_io_port_base))));
+}
+
+static inline u8 inb_p(unsigned long port) {
+	u8	__val;
+
+	__val = __ioswab8(*(volatile u8 *)((port <= 0xffff) ?
+		(port + KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS)) :
+		(port + mips_io_port_base)));
 	SLOW_DOWN_IO;
+	return(__val);
 }
 
-static inline void outw_p(unsigned short val, unsigned long port)
-{
-	*(volatile u16 *)(mips_io_port_base + (port)) = __ioswab16(val);
+static inline u16 inw_p(unsigned long port) {
+	u16	__val;
+
+	__val = __ioswab16(*(volatile u16 *)((port <= 0xffff) ?
+		(port + KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS)) :
+		(port + mips_io_port_base)));
 	SLOW_DOWN_IO;
+	return(__val);
 }
 
-static inline void outl_p(unsigned long val, unsigned long port)
-{
-	*(volatile u32 *)(mips_io_port_base + (port)) = __ioswab32(val);
+static inline u32 inl_p(unsigned long port) {
+	u32	__val;
+
+	__val = __ioswab32(*(volatile u32 *)((port <= 0xffff) ?
+		(port + KSEG1ADDR(IT8172_PCI_IO_BASE + MPU210_ISA_OFS)) :
+		(port + mips_io_port_base)));
 	SLOW_DOWN_IO;
+	return(__val);
 }
 
-static inline unsigned char inb(unsigned long port)
-{
-	return __ioswab8(*(volatile u8 *)(mips_io_port_base + port));
-}
+#else	/* defined(CONFIG_MIPS_SNSC_MPU210) && defined(CONFIG_ISA) */
 
-static inline unsigned short inw(unsigned long port)
-{
-	return __ioswab16(*(volatile u16 *)(mips_io_port_base + port));
-}
+#define outb(val,port)							\
+do {									\
+	*(volatile u8 *)(mips_io_port_base + (port)) = __ioswab8(val);	\
+} while(0)
 
-static inline unsigned int inl(unsigned long port)
-{
-	return __ioswab32(*(volatile u32 *)(mips_io_port_base + port));
-}
+#define outw(val,port)							\
+do {									\
+	*(volatile u16 *)(mips_io_port_base + (port)) = __ioswab16(val);	\
+} while(0)
 
-static inline unsigned char inb_p(unsigned long port)
-{
-	u8 __val;
+#define outl(val,port)							\
+do {									\
+	*(volatile u32 *)(mips_io_port_base + (port)) = __ioswab32(val);\
+} while(0)
 
-	__val = *(volatile u8 *)(mips_io_port_base + port);
-	SLOW_DOWN_IO;
+#define outb_p(val,port)						\
+do {									\
+	*(volatile u8 *)(mips_io_port_base + (port)) = __ioswab8(val);	\
+	SLOW_DOWN_IO;							\
+} while(0)
 
-	return __ioswab8(__val);
-}
+#define outw_p(val,port)						\
+do {									\
+	*(volatile u16 *)(mips_io_port_base + (port)) = __ioswab16(val);\
+	SLOW_DOWN_IO;							\
+} while(0)
 
-static inline unsigned short inw_p(unsigned long port)
-{
-	u16 __val;
+#define outl_p(val,port)						\
+do {									\
+	*(volatile u32 *)(mips_io_port_base + (port)) = __ioswab32(val);\
+	SLOW_DOWN_IO;							\
+} while(0)
 
-	__val = *(volatile u16 *)(mips_io_port_base + port);
-	SLOW_DOWN_IO;
+#define inb(port) (__ioswab8(*(volatile u8 *)(mips_io_port_base + (port))))
+#define inw(port) (__ioswab16(*(volatile u16 *)(mips_io_port_base + (port))))
+#define inl(port) (__ioswab32(*(volatile u32 *)(mips_io_port_base + (port))))
 
-	return __ioswab16(__val);
-}
+#define inb_p(port)							\
+({									\
+	u8 __val;							\
+									\
+	__val = *(volatile u8 *)(mips_io_port_base + (port));		\
+	SLOW_DOWN_IO;							\
+	__ioswab8(__val);						\
+})
 
-static inline unsigned int inl_p(unsigned long port)
-{
-	u32 __val;
+#define inw_p(port)							\
+({									\
+	u16 __val;							\
+									\
+	__val = *(volatile u16 *)(mips_io_port_base + (port));		\
+	SLOW_DOWN_IO;							\
+	__ioswab16(__val);						\
+})
 
-	__val = *(volatile u32 *)(mips_io_port_base + port);
-	SLOW_DOWN_IO;
-	return __ioswab32(__val);
-}
+#define inl_p(port)							\
+({									\
+	u32 __val;							\
+									\
+	__val = *(volatile u32 *)(mips_io_port_base + (port));		\
+	SLOW_DOWN_IO;							\
+	__ioswab32(__val);						\
+})
+
+#endif	/* defined(CONFIG_MIPS_SNSC_MPU210) && defined(CONFIG_ISA) */
 
 static inline void outsb(unsigned long port, void *addr, unsigned int count)
 {

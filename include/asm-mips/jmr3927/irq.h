@@ -7,7 +7,7 @@
  *
  * Copyright (C) 2001 Toshiba Corporation
  *
- * $Id: irq.h,v 1.2 2001/12/02 19:05:32 lethal Exp $
+ * $Id: irq.h,v 1.1 2001/12/08 22:11:34 ppopov Exp $
  */
 #ifndef __ASM_TX3927_IRQ_H
 #define __ASM_TX3927_IRQ_H

@@ -12,15 +12,20 @@
 
 /* PAGE_SHIFT determines the page size */
 #define PAGE_SHIFT	12
-#define PAGE_SIZE	(1L << PAGE_SHIFT)
+#define PAGE_SIZE	(1UL << PAGE_SHIFT)
 #define PAGE_MASK	(~(PAGE_SIZE-1))
 
 #ifdef __KERNEL__
 
 #ifndef _LANGUAGE_ASSEMBLY
 
+#ifdef CONFIG_DEBUG_BUGVERBOSE
 #define BUG() do { printk("kernel BUG at %s:%d!\n", __FILE__, __LINE__); *(int *)0=0; } while (0)
 #define PAGE_BUG(page) do {  BUG(); } while (0)
+#else
+#define BUG()		do { *(int *)0 = 0; } while (0)
+#define PAGE_BUG(page)	do { *(int *)0 = 0; } while (0)
+#endif
 
 /*
  * Prototypes for clear_page / copy_page variants with processor dependant
@@ -41,6 +46,7 @@ void r4k_clear_page_s128(void * page);
 void r5432_clear_page_d32(void * page);
 void rm7k_clear_page(void * page);
 void sb1_clear_page(void * page);
+void r5900_clear_page_d16(void * page);
 void andes_copy_page(void * to, void * from);
 void mips32_copy_page_dc(unsigned long to, unsigned long from);
 void mips32_copy_page_sc(unsigned long to, unsigned long from);
@@ -56,6 +62,7 @@ void r4k_copy_page_s128(void * to, void * from);
 void r5432_copy_page_d32(void * to, void * from);
 void rm7k_copy_page(void * to, void * from);
 void sb1_copy_page(void * to, void * from);
+void r5900_copy_page_d16(void * to, void * from);
 
 extern void (*_clear_page)(void * page);
 extern void (*_copy_page)(void * to, void * from);
@@ -68,29 +75,18 @@ extern void (*_copy_page)(void * to, void * from);
 /*
  * These are used to make use of C type-checking..
  */
-#ifdef CONFIG_64BIT_PHYS_ADDR
-  #ifdef CONFIG_CPU_MIPS32
-    typedef struct { unsigned long pte_low, pte_high; } pte_t;
-    #define pte_val(x)    ((x).pte_low | ((unsigned long long)(x).pte_high << 32))
-  #else
-    typedef struct { unsigned long long pte_low; } pte_t;
-    #define pte_val(x)    ((x).pte_low)
-  #endif
-#else
-typedef struct { unsigned long pte_low; } pte_t;
-#define pte_val(x)    ((x).pte_low)
-#endif
-
+typedef struct { unsigned long pte; } pte_t;
 typedef struct { unsigned long pmd; } pmd_t;
 typedef struct { unsigned long pgd; } pgd_t;
 typedef struct { unsigned long pgprot; } pgprot_t;
 
+#define pte_val(x)	((x).pte)
 #define pmd_val(x)	((x).pmd)
 #define pgd_val(x)	((x).pgd)
 #define pgprot_val(x)	((x).pgprot)
 
 #define __pte(x)	((pte_t) { (x) } )
-#define __pmd(x)	((pmd_t) { (x) } )
+#define __pme(x)	((pme_t) { (x) } )
 #define __pgd(x)	((pgd_t) { (x) } )
 #define __pgprot(x)	((pgprot_t) { (x) } )
 
@@ -111,7 +107,7 @@ extern __inline__ int get_order(unsigned long size)
 #endif /* _LANGUAGE_ASSEMBLY */
 
 /* to align the pointer to the (next) page boundary */
-#define PAGE_ALIGN(addr)	(((addr) + PAGE_SIZE - 1) & PAGE_MASK)
+#define PAGE_ALIGN(addr)	(((addr)+PAGE_SIZE-1)&PAGE_MASK)
 
 /*
  * This handles the memory map.
@@ -122,11 +118,6 @@ extern __inline__ int get_order(unsigned long size)
 #define __va(x)		((void *)((unsigned long) (x) + PAGE_OFFSET))
 #define virt_to_page(kaddr)	(mem_map + (__pa(kaddr) >> PAGE_SHIFT))
 #define VALID_PAGE(page)	((page - mem_map) < max_mapnr)
-
-/*
- * Memory above this physical address will be considered highmem.
- */
-#define HIGHMEM_START	(0x20000000)
 
 #endif /* defined (__KERNEL__) */
 

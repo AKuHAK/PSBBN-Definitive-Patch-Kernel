@@ -33,12 +33,34 @@
 #define __bi_save_flags(x) __save_flags(x)
 #define __bi_save_and_cli(x) __save_and_cli(x)
 #define __bi_restore_flags(x) __restore_flags(x)
-#else
+
+#else /* __KERNEL__ */
+
+#include <features.h>
+
+#if  __GLIBC__ > 2 || ( __GLIBC__ == 2 && __GLIBC_MINOR__ >=2 )
+
+#include <sys/tas.h>
+
+volatile int __asm_bitops_lock;
+
+#define __bi_flags
+#define __bi_cli()
+#define __bi_save_flags(x) \
+	do {\
+		while (_test_and_set ((int*)&__asm_bitops_lock, 1));	\
+	} while (0)
+#define __bi_restore_flags(x)	__asm_bitops_lock=0
+
+#else /*  __GLIBC__ > 2 || ( __GLIBC__ == 2 && __GLIBC_MINOR__ >=2 ) */
+
 #define __bi_flags
 #define __bi_cli()
 #define __bi_save_flags(x)
-#define __bi_save_and_cli(x)
 #define __bi_restore_flags(x)
+
+#endif /*  __GLIBC__ > 2 || ( __GLIBC__ == 2 && __GLIBC_MINOR__ >=2 ) */
+
 #endif /* __KERNEL__ */
 
 #ifdef CONFIG_CPU_HAS_LLSC
@@ -598,7 +620,8 @@ extern __inline__ int find_first_zero_bit (void *addr, unsigned size)
 		"lw\t$1,-4(%5)\n\t"
 #if (_MIPS_ISA == _MIPS_ISA_MIPS2 ) || (_MIPS_ISA == _MIPS_ISA_MIPS3 ) || \
     (_MIPS_ISA == _MIPS_ISA_MIPS4 ) || (_MIPS_ISA == _MIPS_ISA_MIPS5 ) || \
-    (_MIPS_ISA == _MIPS_ISA_MIPS32) || (_MIPS_ISA == _MIPS_ISA_MIPS64)
+    (_MIPS_ISA == _MIPS_ISA_MIPS32) || (_MIPS_ISA == _MIPS_ISA_MIPS64) || \
+    defined(CONFIG_CPU_R5900)
 		"beql\t%1,$1,1b\n\t"
 		"addiu\t%0,32\n\t"
 #else

@@ -10,9 +10,6 @@
 #ifndef _ASM_SOFTIRQ_H
 #define _ASM_SOFTIRQ_H
 
-#include <linux/sched.h>
-#include <linux/spinlock.h>
-
 #include <asm/atomic.h>
 #include <asm/hardirq.h>
 

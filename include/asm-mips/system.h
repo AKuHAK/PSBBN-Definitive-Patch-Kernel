@@ -20,6 +20,7 @@
 #include <asm/sgidefs.h>
 #include <asm/ptrace.h>
 #include <linux/kernel.h>
+#include <asm/asm.h>
 
 
 #ifdef CONFIG_ILATENCY
@@ -40,7 +41,7 @@ __asm__ (
 	"mfc0\t$1,$12\n\t"
 	"ori\t$1,0x1f\n\t"
 	"xori\t$1,0x1e\n\t"
-	"mtc0\t$1,$12\n\t"
+	MTC0_str($1,$12)
 	".set\tpop\n\t"
 	".endm");
 
@@ -69,7 +70,7 @@ __asm__ (
 	"ori\t$1,1\n\t"
 	"xori\t$1,1\n\t"
 	".set\tnoreorder\n\t"
-	"mtc0\t$1,$12\n\t"
+	MTC0_str($1,$12)
 	"sll\t$0, $0, 1\t\t\t# nop\n\t"
 	"sll\t$0, $0, 1\t\t\t# nop\n\t"
 	"sll\t$0, $0, 1\t\t\t# nop\n\t"
@@ -112,7 +113,7 @@ __asm__(".macro\t__restore_flags flags\n\t"
 	"ori\t$1, 1\n\t"
 	"xori\t$1, 1\n\t"
 	"or\t\\flags, $1\n\t"
-	"mtc0\t\\flags, $12\n\t"
+	MTC0_str(\\flags, $12)
 	"nop\n\t"
 	"nop\n\t"
 	"nop\n\t"
@@ -142,7 +143,7 @@ __asm__ (
 	"mfc0\t$1,$12\n\t"
 	"ori\t$1,0x1f\n\t"
 	"xori\t$1,0x1e\n\t"
-	"mtc0\t$1,$12\n\t"
+	MTC0_str($1,$12)
 	".set\tpop\n\t"
 	".endm");
 
@@ -172,7 +173,7 @@ __asm__ (
 	"ori\t$1,1\n\t"
 	"xori\t$1,1\n\t"
 	".set\tnoreorder\n\t"
-	"mtc0\t$1,$12\n\t"
+	MTC0_str($1,$12)
 	"nop\n\t"
 	"nop\n\t"
 	"nop\n\t"
@@ -211,7 +212,7 @@ __asm__ (
 	"ori\t$1, \\result, 1\n\t"
 	"xori\t$1, 1\n\t"
 	".set\tnoreorder\n\t"
-	"mtc0\t$1, $12\n\t"
+	MTC0_str($1, $12)
 	"sll\t$0, $0, 1\t\t\t# nop\n\t"
 	"sll\t$0, $0, 1\t\t\t# nop\n\t"
 	"sll\t$0, $0, 1\t\t\t# nop\n\t"
@@ -233,7 +234,7 @@ __asm__(".macro\t__restore_flags flags\n\t"
 	"ori\t$1, 1\n\t"
 	"xori\t$1, 1\n\t"
 	"or\t\\flags, $1\n\t"
-	"mtc0\t\\flags, $12\n\t"
+	MTC0_str(\\flags, $12)
 	"nop\n\t"
 	"nop\n\t"
 	"nop\n\t"
@@ -401,18 +402,16 @@ extern void __die_if_kernel(const char *, struct pt_regs *, const char *where,
 #define die_if_kernel(msg, regs)					\
 	__die_if_kernel(msg, regs, __FILE__ ":"__FUNCTION__, __LINE__)
 
-static inline int intr_on(void)
+extern __inline__ int intr_on(void)
 {
 	unsigned long flags;
 	save_flags(flags);
 	return flags & 1;
 }
 
-static inline int intr_off(void)
+extern __inline__ int intr_off(void)
 {
 	return ! intr_on();
 }
-
-#define irqs_disabled()	intr_off()
 
 #endif /* _ASM_SYSTEM_H */

@@ -15,10 +15,10 @@
 #define ADB_MOUSE_MINOR 10
 #define WATCHDOG_MINOR		130	/* Watchdog timer     */
 #define TEMP_MINOR		131	/* Temperature Sensor */
-#define LED_MINOR		132	/* LED device driver */
 #define RTC_MINOR 135
 #define EFI_RTC_MINOR		136	/* EFI Time services */
 #define SUN_OPENPROM_MINOR 139
+#define DMAPI_MINOR		140	/* DMAPI */
 #define NVRAM_MINOR 144
 #define I2O_MINOR 166
 #define MICROCODE_MINOR		184

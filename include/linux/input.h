@@ -469,7 +469,7 @@ struct input_event {
 #define BUS_ISAPNP		0x02
 #define BUS_USB			0x03
 
-#define BUS_ISA			0x10
+/* #define BUS_ISA			0x10   conflicts with sysctl.h */
 #define BUS_I8042		0x11
 #define BUS_XTKBD		0x12
 #define BUS_RS232		0x13

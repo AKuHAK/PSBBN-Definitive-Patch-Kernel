@@ -8,6 +8,7 @@
 #ifndef _ASM_CHECKSUM_H
 #define _ASM_CHECKSUM_H
 
+#include <linux/config.h>
 #include <asm/uaccess.h>
 
 /*
@@ -126,6 +127,9 @@ static inline unsigned short ip_fast_csum(unsigned char *iph,
 	"addiu\t%1, 4\n\t"
 	"addu\t%0, %3\n\t"
 	"sltu\t$1, %0, %3\n\t"
+#ifdef CONFIG_CPU_R5900	/* inhibit short loop */
+	"nop\n\t"
+#endif
 	"bne\t%2, %1, 1b\n\t"
 	" addu\t%0, $1\n"
 
@@ -252,8 +256,8 @@ static __inline__ unsigned short int csum_ipv6_magic(struct in6_addr *saddr,
 	"sltu\t$1, %0, %1\n\t"
 
 	"addu\t%0, $1\t\t\t# Add final carry\n\t"
-	".set\tnoat\n\t"
-	".set\tnoreorder"
+	".set\tat\n\t"
+	".set\treorder"
 	: "=r" (sum), "=r" (proto)
 	: "r" (saddr), "r" (daddr),
 	  "0" (htonl(len)), "1" (htonl(proto)), "r" (sum));

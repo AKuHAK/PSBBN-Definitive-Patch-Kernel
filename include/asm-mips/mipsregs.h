@@ -12,7 +12,10 @@
 #ifndef _ASM_MIPSREGS_H
 #define _ASM_MIPSREGS_H
 
+#include <linux/config.h>
 #include <linux/linkage.h>
+
+#include <asm/asm.h>
 
 /*
  * The following macros are especially useful for __asm__
@@ -58,37 +61,6 @@
 #define CP0_TAGLO $28
 #define CP0_TAGHI $29
 #define CP0_ERROREPC $30
-
-#define CCP0_INDEX 0
-#define CCP0_RANDOM 1
-#define CCP0_ENTRYLO0 2
-#define CCP0_ENTRYLO1 3
-#define CCP0_CONF 3
-#define CCP0_CONTEXT 4
-#define CCP0_PAGEMASK 5
-#define CCP0_WIRED 6
-#define CCP0_INFO 7
-#define CCP0_BADVADDR 8
-#define CCP0_COUNT 9
-#define CCP0_ENTRYHI 10
-#define CCP0_COMPARE 11
-#define CCP0_STATUS 12
-#define CCP0_CAUSE 13
-#define CCP0_EPC 14
-#define CCP0_PRID 15
-#define CCP0_CONFIG 16
-#define CCP0_LLADDR 17
-#define CCP0_WATCHLO 18
-#define CCP0_WATCHHI 19
-#define CCP0_XCONTEXT 20
-#define CCP0_FRAMEMASK 21
-#define CCP0_DIAGNOSTIC 22
-#define CCP0_PERFORMANCE 25
-#define CCP0_ECC 26
-#define CCP0_CACHEERR 27
-#define CCP0_TAGLO 28
-#define CCP0_TAGHI 29
-#define CCP0_ERROREPC 30
 
 #ifdef CONFIG_CPU_LX45XXX
 #define CP0_CCTL $20		/* Lexra Cache Control Register */
@@ -191,7 +163,6 @@
 /*
  * Values for PageMask register
  */
-#include <linux/config.h>
 #ifdef CONFIG_CPU_VR41XX
 
 #define PM_1K   0x00000000
@@ -320,16 +291,6 @@
 /*
  * Status register bits available in all MIPS CPUs.
  */
-#define ST0_IE                        0x00000001
-#define ST0_EXL                       0x00000002
-#define ST0_ERL                       0x00000004
-#define ST0_KSU                       0x00000018
-#define ST0_KSU_KERNEL                0x00000000
-#define ST0_KSU_SUPERVISOR            0x00000008
-#define ST0_KSU_USER                  0x00000010
-#define ST0_UX                        0x00000020
-#define ST0_SX                        0x00000040
-#define ST0_KX                        0x00000080
 #define ST0_IM			0x0000ff00
 #define  STATUSB_IP0		8
 #define  STATUSF_IP0		(1   <<  8)
@@ -435,6 +396,21 @@
 #define TX49_CONF_CWFON			(1 << 27)
 
 /*
+ * Bits in the R5900 coprosessor 0 config register.
+ *
+ *  BPE: Branch prediction enable
+ *  NBE: Non blocking load enable
+ *  DCE: Data cache enable
+ *  ICE: Inst. cache enable
+ *  DIE: Double issue enable
+ */
+#define R5900_CONF_BPE			(1 << 12)
+#define R5900_CONF_NBE			(1 << 13)
+#define R5900_CONF_DCE			(1 << 16)
+#define R5900_CONF_ICE			(1 << 17)  /* conflict with CONF_SC */
+#define R5900_CONF_DIE			(1 << 18)
+
+/*
  * R10000 performance counter definitions.
  *
  * FIXME: The R10000 performance counter opens a nice way to implement CPU
@@ -492,9 +468,6 @@
 
 #ifndef _LANGUAGE_ASSEMBLY
 
-#define CAUSE_EXCCODE(x) ((CAUSEF_EXCCODE & (x->cp0_cause)) >> CAUSEB_EXCCODE)
-#define CAUSE_EPC(x) (x->cp0_epc + (((x->cp0_cause & CAUSEF_BD) >> CAUSEB_BD) << 2))
-
 /*
  * Macros to access the system control coprocessor
  */
@@ -532,7 +505,7 @@
 
 #define write_32bit_cp0_register(register,value)                \
         __asm__ __volatile__(                                   \
-        "mtc0\t%0,"STR(register)"\n\t"				\
+        MTC0_str(%0, register)					\
 	"nop"							\
         : : "r" (value));
 
@@ -638,7 +611,7 @@ static inline void set_pagemask(unsigned long val)
 	__asm__ __volatile__(
 		".set push\n\t"
 		".set reorder\n\t"
-		"mtc0 %z0, $5\n\t"
+		MTC0_str(%z0, $5)
 		".set pop"
 		: : "Jr" (val));
 }
@@ -662,7 +635,7 @@ static inline void set_entrylo0(unsigned long val)
 	__asm__ __volatile__(
 		".set push\n\t"
 		".set reorder\n\t"
-		"mtc0 %z0, $2\n\t"
+		MTC0_str(%z0, $2)
 		".set pop"
 		: : "Jr" (val));
 }
@@ -685,7 +658,7 @@ static inline void set_entrylo1(unsigned long val)
 	__asm__ __volatile__(
 		".set push\n\t"
 		".set reorder\n\t"
-		"mtc0 %z0, $3\n\t"
+		MTC0_str(%z0, $3)
 		".set pop"
 		: : "Jr" (val));
 }
@@ -710,7 +683,7 @@ static inline void set_entryhi(unsigned long val)
 	__asm__ __volatile__(
 		".set push\n\t"
 		".set reorder\n\t"
-		"mtc0 %z0, $10\n\t"
+		MTC0_str(%z0, $10)
 		".set pop"
 		: : "Jr" (val));
 }
@@ -734,7 +707,7 @@ static inline void set_index(unsigned long val)
 	__asm__ __volatile__(
 		".set push\n\t"
 		".set reorder\n\t"
-		"mtc0 %z0, $0\n\t"
+		MTC0_str(%z0, $0)
 		".set pop"
 		: : "Jr" (val));
 }
@@ -758,7 +731,7 @@ static inline void set_wired(unsigned long val)
 	__asm__ __volatile__(
 		".set push\n\t"
 		".set reorder\n\t"
-		"mtc0 %z0, $6\n\t"
+		MTC0_str(%z0, $6)
 		".set pop"
 		: : "Jr" (val));
 }
@@ -782,7 +755,7 @@ static inline void set_status(unsigned long val)
 	__asm__ __volatile__(
 		".set push\n\t"
 		".set reorder\n\t"
-		"mtc0 %z0, $12\n\t"
+		MTC0_str(%z0, $12)
 		".set pop"
 		: : "Jr" (val));
 }
@@ -819,7 +792,7 @@ static inline void set_taglo(unsigned long val)
 	__asm__ __volatile__(
 		".set push\n\t"
 		".set reorder\n\t"
-		"mtc0 %z0, $28\n\t"
+		MTC0_str(%z0, $28)
 		".set pop"
 		: : "Jr" (val));
 }
@@ -842,7 +815,7 @@ static inline void set_taghi(unsigned long val)
 	__asm__ __volatile__(
 		".set push\n\t"
 		".set reorder\n\t"
-		"mtc0 %z0, $29\n\t"
+		MTC0_str(%z0, $29)
 		".set pop"
 		: : "Jr" (val));
 }
@@ -867,7 +840,7 @@ static inline void set_context(unsigned long val)
 	__asm__ __volatile__(
 		".set push\n\t"
 		".set reorder\n\t"
-		"mtc0 %z0, $4\n\t"
+		MTC0_str(%z0, $4)
 		".set pop"
 		: : "Jr" (val));
 }

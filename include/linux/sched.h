@@ -161,7 +161,6 @@ extern spinlock_t mmlist_lock;
 
 extern void sched_init(void);
 extern void init_idle(void);
-extern int idle_cpu(int cpu); 
 extern void show_state(void);
 extern void cpu_init (void);
 extern void trap_init(void);
@@ -441,6 +440,8 @@ struct task_struct {
         void (*newprio)(struct task_struct*, int);
 #endif
 	
+	void *security;
+
 /* Thread group tracking */
    	u32 parent_exec_id;
    	u32 self_exec_id;
@@ -466,6 +467,7 @@ struct task_struct {
 #define PF_MEMDIE	0x00001000	/* Killed for out-of-memory */
 #define PF_FREE_PAGES	0x00002000	/* per process page freeing */
 #define PF_NOIO		0x00004000	/* avoid generating further I/O */
+#define PF_FSTRANS	0x00008000	/* inside a filesystem transaction */
 
 #define PF_USEDFPU	0x00100000	/* task used FPU this quantum (SMP) */
 
@@ -768,19 +770,19 @@ static inline int fsuser(void)
  * fsuser(). See include/linux/capability.h for defined capabilities.
  */
 
+#ifdef CONFIG_SECURITY
+/* capable prototype and code moved to security.[hc] */
+extern int capable (int cap);
+#else
 static inline int capable(int cap)
 {
-#if 1 /* ok now */
-	if (cap_raised(current->cap_effective, cap))
-#else
-	if (cap_is_fs_cap(cap) ? current->fsuid == 0 : current->euid == 0)
-#endif
-	{
+	if (cap_raised(current->cap_effective, cap)) {
 		current->flags |= PF_SUPERPRIV;
 		return 1;
 	}
 	return 0;
 }
+#endif
 
 /*
  * Routines for handling mm_structs

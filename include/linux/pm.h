@@ -46,6 +46,10 @@ enum
 	/* base station management */
 	PM_EJECT,
 	PM_LOCK,
+
+#ifdef CONFIG_SNSC
+	PM_QUERY_NAME,
+#endif
 };
 
 typedef int pm_request_t;
@@ -210,6 +214,10 @@ static inline void pm_dev_idle(struct pm_dev *dev) {}
 
 extern void (*pm_idle)(void);
 extern void (*pm_power_off)(void);
+
+#ifdef CONFIG_SNSC
+extern struct semaphore pm_devs_lock;
+#endif
 
 #endif /* __KERNEL__ */
 

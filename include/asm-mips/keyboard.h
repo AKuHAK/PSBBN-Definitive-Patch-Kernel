@@ -76,6 +76,23 @@ extern struct kbd_ops *kbd_ops;
 #define kbd_write_command(val) kbd_ops->kbd_write_command(val)
 #define kbd_read_status() kbd_ops->kbd_read_status()
 
+#elif defined(CONFIG_SNSC_MPU200)
+
+#define KEYCODE(row,col)	(((col)<<4) + (row) + 1)
+#define KBUP			0x80
+
+extern int kpad_translate(u_char scancode, unsigned char *keycode);
+
+#define kbd_setkeycode(sc,kc)	(-EINVAL)
+#define kbd_getkeycode(sc)	(-EINVAL)
+#define kbd_translate(sc, kcp, rm)	kpad_translate(sc, kcp)
+#define kbd_unexpected_up(kc)	(0x80)
+#define kbd_leds(led)
+#define kbd_init_hw()		kpad_hw_init()
+#define kbd_sysrq_xlate         (1)
+#define kbd_disable_irq()	disable_irq(IRQ_KEY)
+#define kbd_enable_irq()	enable_irq(IRQ_KEY)
+
 #else
 
 extern int kbd_setkeycode(unsigned int scancode, unsigned int keycode);
