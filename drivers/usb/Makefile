@@ -52,7 +52,7 @@ obj-$(CONFIG_USB_MPC8xx)	+= m8xxhci.o
 obj-$(CONFIG_USB_OHCI)		+= usb-ohci.o
 obj-$(CONFIG_USB_OHCI_SA1111)	+= usb-ohci-sa1111.o
 obj-$(CONFIG_USB_NON_PCI_OHCI)	+= usb-ohci-nonpci.o
-obj-$(CONFIG_USB_OCP_OHCI)      += usb-ocp-ohci.o
+obj-$(CONFIG_USB_OHCI_PS2)	+= usb-ohci-ps2.o
 
 obj-$(CONFIG_USB_MOUSE)		+= usbmouse.o
 obj-$(CONFIG_USB_HID)		+= hid.o
@@ -81,6 +81,7 @@ obj-$(CONFIG_USB_MICROTEK)	+= microtek.o
 obj-$(CONFIG_USB_HPUSBSCSI)	+= hpusbscsi.o
 obj-$(CONFIG_USB_BLUETOOTH)	+= bluetooth.o
 obj-$(CONFIG_USB_USBNET)	+= usbnet.o
+obj-$(CONFIG_USB_PD)		+= usbpd.o
 
 # Object files in subdirectories
 mod-subdirs	:= serial
