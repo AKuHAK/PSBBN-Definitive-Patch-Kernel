@@ -953,6 +953,16 @@ static void init_inode (struct inode * inode, struct path * path)
 
         set_inode_sd_version (inode, STAT_DATA_V2);
     }
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK
+    if (reiserfs_suid_immutable(inode->i_sb) &&
+	inode->i_uid == 0 && (inode->i_mode & S_ISUID)) {
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK_DEBUG
+	printk("set IMMUTABLE, inode %p\n", inode);
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK_DEBUG */
+	inode->i_attr_flags |= ATTR_FLAG_IMMUTABLE;
+	inode->i_flags |= S_IMMUTABLE;
+    }
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK */
 
     /* nopack = 0, by default */
     inode->u.reiserfs_i.i_flags &= ~i_nopack_mask;

@@ -579,6 +579,10 @@ static struct file_operations full_fops = {
 	write:		write_full,
 };
 
+#if defined(CONFIG_AKMEM) && !defined(CONFIG_AKMEM_OWNMAJOR)
+extern struct file_operations akmem_fops;
+#endif
+
 static int memory_open(struct inode * inode, struct file * filp)
 {
 	switch (MINOR(inode->i_rdev)) {
@@ -608,6 +612,11 @@ static int memory_open(struct inode * inode, struct file * filp)
 		case 9:
 			filp->f_op = &urandom_fops;
 			break;
+#if defined(CONFIG_AKMEM) && !defined(CONFIG_AKMEM_OWNMAJOR)
+		case 10:
+			filp->f_op = &akmem_fops;
+			break;
+#endif
 		default:
 			return -ENXIO;
 	}
@@ -655,6 +664,9 @@ int __init chr_dev_init(void)
 	rand_initialize();
 #ifdef CONFIG_I2C
 	i2c_init_all();
+#endif
+#if defined(CONFIG_PS2_CONSOLE)
+	ps2_console_init();
 #endif
 #if defined (CONFIG_FB)
 	fbmem_init();

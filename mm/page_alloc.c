@@ -72,6 +72,9 @@ static void __free_pages_ok (struct page *page, unsigned int order)
 	struct page *base;
 	zone_t *zone;
 
+	if (PageLRU(page))
+		lru_cache_del(page);
+
 	if (page->buffers)
 		BUG();
 	if (page->mapping)
@@ -512,6 +515,37 @@ unsigned int nr_free_highpages (void)
 #endif
 
 #define K(x) ((x) << (PAGE_SHIFT-10))
+
+/*
+ * If it returns non zero it means there's lots of ram "free"
+ * (note: not in cache!) so any caller will know that
+ * he can allocate some memory to do some more aggressive
+ * (possibly wasteful) readahead. The state of the memory
+ * should be rechecked after every few pages allocated for
+ * doing this aggressive readahead.
+ *
+ * NOTE: caller passes in gfp_mask of zones to check
+ */
+int start_aggressive_readahead(int gfp_mask)
+{
+	pg_data_t *pgdat = pgdat_list;
+	zonelist_t *zonelist;
+	zone_t **zonep, *zone;
+	int ret = 0;
+
+	do {
+		zonelist = pgdat->node_zonelists + (gfp_mask & GFP_ZONEMASK);
+		zonep = zonelist->zones;
+
+		for (zone = *zonep++; zone; zone = *zonep++)
+			if (zone->free_pages > zone->pages_high * 2)
+				ret = 1;
+
+		pgdat = pgdat->node_next;
+	} while (pgdat);
+
+	return ret;
+}
 
 /*
  * Show free area list (used inside shift_scroll-lock stuff)

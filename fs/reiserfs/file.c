@@ -122,7 +122,35 @@ static int reiserfs_setattr(struct dentry *dentry, struct iattr *attr) {
 		/* stat data of format v3.5 has 16 bit uid and gid */
 	    return -EINVAL;
 
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK 
+    if (reiserfs_suid_immutable(inode->i_sb)) {
+	uid_t uid;
+	umode_t mode;
+
+	uid = (attr->ia_valid & ATTR_UID) ? attr->ia_uid : inode->i_uid;
+	mode = (attr->ia_valid & ATTR_MODE) ? attr->ia_mode : inode->i_mode;
+	if (uid == 0 && (mode & S_ISUID) && !capable(CAP_LINUX_IMMUTABLE))
+	    return -EPERM;
+    }
+#endif /* COCONFIG_REISERFS_IMMUTABLE_HACK */
+
     error = inode_change_ok(inode, attr) ;
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK 
+    if (!error && reiserfs_suid_immutable(inode->i_sb)) {
+	uid_t uid;
+	umode_t mode;
+
+	uid = (attr->ia_valid & ATTR_UID) ? attr->ia_uid : inode->i_uid;
+	mode = (attr->ia_valid & ATTR_MODE) ? attr->ia_mode : inode->i_mode;
+	inode->i_flags &= ~S_IMMUTABLE;
+	if (uid == 0 && (mode & S_ISUID)) {
+	    inode->i_flags |= S_IMMUTABLE;
+#ifdef CONFIG_REISERFS_IMMUTABLE_HACK_DEBUG 
+	    printk("set IMMUTABLE, inode %p\n", inode); 
+#endif /* CONFIG_REISERFS_IMMUTABLE_HACK_DEBUG */ 
+	}
+    }
+#endif /* COCONFIG_REISERFS_IMMUTABLE_HACK */
     if (!error)
         inode_setattr(inode, attr) ;
 

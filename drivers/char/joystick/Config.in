@@ -5,6 +5,7 @@
 mainmenu_option next_comment
 comment 'Joysticks'
 
+
 if [ "$CONFIG_INPUT" != "n" ]; then
    dep_tristate 'Game port support' CONFIG_INPUT_GAMEPORT $CONFIG_INPUT
       dep_tristate '  Classic ISA/PnP gameports' CONFIG_INPUT_NS558 $CONFIG_INPUT_GAMEPORT
