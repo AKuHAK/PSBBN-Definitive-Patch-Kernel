@@ -680,6 +680,14 @@ void timer_bh(void)
 	TRACE_EVENT(TRACE_EV_KERNEL_TIMER, NULL);
 	update_times();
 	run_timer_list();
+    {
+	/* XXX for tq_disk stall problem */
+	static int x = 0;
+	if (++x > 300) {
+	    x = 0;
+	    run_task_queue(&tq_disk);
+	}
+    }
 }
 
 void do_timer(struct pt_regs *regs)
