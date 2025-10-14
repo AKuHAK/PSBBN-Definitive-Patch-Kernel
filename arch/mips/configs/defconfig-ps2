@@ -607,7 +607,7 @@ CONFIG_PROC_FS=y
 # CONFIG_QNX4FS_FS is not set
 # CONFIG_QNX4FS_RW is not set
 # CONFIG_ROMFS_FS is not set
-CONFIG_EXT2_FS=m
+CONFIG_EXT2_FS=y
 # CONFIG_SYSV_FS is not set
 CONFIG_UDF_FS=m
 # CONFIG_UDF_RW is not set
