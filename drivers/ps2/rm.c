@@ -103,6 +103,20 @@ ps2rm_read(struct file *filp, char *buf, size_t size, loff_t *off)
 	printk("\n");
 	*/
 
+	// Check if first 4 bytes match pattern_e0_prefix or pattern_d0_prefix
+	if (res >= 4 && 
+	    (memcmp(data, pattern_e0_prefix, 4) == 0 || memcmp(data, pattern_d0_prefix, 4) == 0)) {
+
+		// printk(KERN_DEBUG "ps2rm: X/O match found - before: data[3]=0x%02X\n", data[3]);
+
+		if (data[3] == 0xE0)
+			data[3] = 0xD0;
+		else if (data[3] == 0xD0)
+			data[3] = 0xE0;
+
+		// printk(KERN_DEBUG "ps2rm: X/O swapped - after:  data[3]=0x%02X\n", data[3]);
+	}
+
 	/* --- Remap Rules (independent) --- */
 
 	// Remap enter button

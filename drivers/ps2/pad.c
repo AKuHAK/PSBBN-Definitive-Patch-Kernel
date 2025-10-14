@@ -18,6 +18,7 @@
 #include <linux/major.h>
 #include <asm/addrspace.h>
 #include <asm/uaccess.h>
+#include <asm/ps2/bootinfo.h>
 #ifdef CONFIG_PROC_FS
 #include <linux/proc_fs.h>
 #endif
@@ -294,6 +295,10 @@ static ssize_t
 ps2pad_read(struct file *filp, char *buf, size_t size, loff_t *off)
 {
 	int res;
+	int o_pressed = 0, x_pressed = 0;
+	u16 buttons;
+	u16 o_mask = 0x2000;
+	u16 x_mask = 0x4000;
 	struct ps2pad_dev *dev = filp->private_data;
 	u_char data[PS2PAD_DATASIZE];
 
@@ -307,6 +312,28 @@ ps2pad_read(struct file *filp, char *buf, size_t size, loff_t *off)
 	if (res == 0 || data[0] != 0) {
 		/* pad data is invalid */
 		return -EIO;	/* XXX */
+	}
+
+	buttons = (data[3] << 8) | data[2];
+
+	// Only try to swap buttons if we have enough bytes and console region is not Japanese
+	res = (data[1] & 0x0f) * 2 + 2;
+	if (res >= 6 &&
+	    strcmp(ps2_bootinfo->ver_dvd_id, "J") != 0 &&
+	    strcmp(ps2_bootinfo->ver_dvd_id, "") != 0) {
+
+		o_pressed = ((buttons & o_mask) == 0);
+		x_pressed = ((buttons & x_mask) == 0);
+
+		// Set both released
+		buttons |= (o_mask | x_mask);
+
+		// Re-apply swapped
+		if (o_pressed) buttons &= ~x_mask;
+		if (x_pressed) buttons &= ~o_mask;
+
+		data[2] = buttons & 0xFF;
+		data[3] = (buttons >> 8) & 0xFF;
 	}
 
 	/*
@@ -759,8 +786,8 @@ int __init ps2pad_init(void)
 	init_flags |= INIT_BUF;
 
 	for (i = 0; i < MAXNPADS; i++) {
-		/* 
-		 * We must access asynchronous DMA buffer via 
+		/*
+		 * We must access asynchronous DMA buffer via
 		 * non-cached segment(KSEG1).
 		 */
 		ps2pad_pads[i].dmabuf = (void *)KSEG1ADDR(&dmabuf[DMABUFSIZE * i]);
