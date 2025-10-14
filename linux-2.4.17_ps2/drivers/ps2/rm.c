@@ -77,8 +77,12 @@ static ssize_t
 ps2rm_read(struct file *filp, char *buf, size_t size, loff_t *off)
 {
 	int res;
+	// int i;
 	struct ps2rm_dev *dev = filp->private_data;
 	u_char data[SB_REMOCON_MAXDATASIZE];
+
+	const u_char pattern_e0_prefix[] = { 0x14, 0xDA, 0xD5, 0xE0 };
+	const u_char pattern_d0_prefix[] = { 0x14, 0xDA, 0xD5, 0xD0 };
 
 	res = ps2sif_lock_interruptible(ps2rm_lock, "read");
 	if (res < 0)
@@ -91,6 +95,101 @@ ps2rm_read(struct file *filp, char *buf, size_t size, loff_t *off)
 	ps2sif_unlock(ps2rm_lock);
 	if (res <= 0)
 		return -EIO;	/* error */
+
+	/* Always print full packet 
+	printk(KERN_DEBUG "ps2rm: data[] =");
+	for (i = 0; i < res; i++)
+		printk(" %02X", data[i]);
+	printk("\n");
+	*/
+
+	// Check if first 4 bytes match pattern_e0_prefix or pattern_d0_prefix
+	if (res >= 4 && 
+	    (memcmp(data, pattern_e0_prefix, 4) == 0 || memcmp(data, pattern_d0_prefix, 4) == 0)) {
+
+		// printk(KERN_DEBUG "ps2rm: X/O match found - before: data[3]=0x%02X\n", data[3]);
+
+		if (data[3] == 0xE0)
+			data[3] = 0xD0;
+		else if (data[3] == 0xD0)
+			data[3] = 0xE0;
+
+		// printk(KERN_DEBUG "ps2rm: X/O swapped - after:  data[3]=0x%02X\n", data[3]);
+	}
+
+	/* --- Remap Rules (independent) --- */
+
+	// Remap enter button
+	if (res >= 4 && data[0] == 0x14 && data[1] == 0x49 && data[2] == 0xD0 && data[3] == 0xB0) {
+		// printk(KERN_DEBUG "ps2rm: Remap 14 49 D0 B0 - 14 DA D5 D0\n");
+		data[1] = 0xDA;
+		data[2] = 0xD5;
+		data[3] = 0xD0;
+	}
+
+	// Remap next button
+	if (res >= 4 && data[0] == 0x14 && data[1] == 0x49 && data[2] == 0xD3 && data[3] == 0x10) {
+		// printk(KERN_DEBUG "ps2rm: Remap 14 49 D3 10 - 14 DA D5 B0\n");
+		data[1] = 0xDA;
+		data[2] = 0xD5;
+		data[3] = 0xB0;
+	}
+
+	// Remap previous button
+	if (res >= 4 && data[0] == 0x14 && data[1] == 0x49 && data[2] == 0xD3 && data[3] == 0x00) {
+		// printk(KERN_DEBUG "ps2rm: Remap 14 49 D3 00 - 14 DA D5 A0\n");
+		data[1] = 0xDA;
+		data[2] = 0xD5;
+		data[3] = 0xA0;
+	}
+
+	// Remap scan forward button
+	if (res >= 4 && data[0] == 0x14 && data[1] == 0x49 && data[2] == 0xD3 && data[3] == 0x40) {
+		// printk(KERN_DEBUG "ps2rm: Remap 14 49 D3 40 - 14 DA D5 90\n");
+		data[1] = 0xDA;
+		data[2] = 0xD5;
+		data[3] = 0x90;
+	}
+
+	// Remap scan backward button
+	if (res >= 4 && data[0] == 0x14 && data[1] == 0x49 && data[2] == 0xD3 && data[3] == 0x30) {
+		// printk(KERN_DEBUG "ps2rm: Remap 14 49 D3 30 - 14 DA D5 80\n");
+		data[1] = 0xDA;
+		data[2] = 0xD5;
+		data[3] = 0x80;
+	}
+
+	// Remap display button
+	if (res >= 4 && data[0] == 0x14 && data[1] == 0x49 && data[2] == 0xD5 && data[3] == 0x40) {
+		// printk(KERN_DEBUG "ps2rm: Remap 14 49 D5 40 - 14 DA D5 00\n");
+		data[1] = 0xDA;
+		data[2] = 0xD5;
+		data[3] = 0x00;
+	}
+
+	// Remap stop button
+	if (res >= 4 && data[0] == 0x14 && data[1] == 0x49 && data[2] == 0xD3 && data[3] == 0x80) {
+		// printk(KERN_DEBUG "ps2rm: Remap 14 49 D3 80 - 14 DA D5 E0\n");
+		data[1] = 0xDA;
+		data[2] = 0xD5;
+		data[3] = 0xE0;
+	}
+
+	// Remap play button
+	if (res >= 4 && data[0] == 0x14 && data[1] == 0x49 && data[2] == 0xD3 && data[3] == 0x20) {
+		// printk(KERN_DEBUG "ps2rm: Remap 14 49 D3 20 - 14 DA D5 30\n");
+		data[1] = 0xDA;
+		data[2] = 0xD5;
+		data[3] = 0x30;
+	}
+
+	// Remap pause button
+	if (res >= 4 && data[0] == 0x14 && data[1] == 0x49 && data[2] == 0xD3 && data[3] == 0x90) {
+		// printk(KERN_DEBUG "ps2rm: Remap 14 49 D3 90 - 14 DA D5 30\n");
+		data[1] = 0xDA;
+		data[2] = 0xD5;
+		data[3] = 0x30;
+	}
 
 	if (size < res)
 		res = size;
