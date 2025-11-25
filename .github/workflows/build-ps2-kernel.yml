@@ -1,0 +1,82 @@
+name: Build PS2 2.4.17 Kernel (ps2toolchain)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+    working-directory: linux-2.4.17  # Adjust to your kernel source directory
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # Use your ps2homebrew docker image with modern ps2toolchain
+    container:
+      image: ghcr.io/ps2homebrew/ps2homebrew:main
+
+    env:
+      ARCH: mips
+      CROSS_COMPILE: mips64r5900el-ps2-elf-
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain info
+        run: |
+          which ${CROSS_COMPILE}gcc || echo "gcc not found"
+          ${CROSS_COMPILE}gcc -v || true
+          uname -a
+
+      - name: Run setup-ps2 and prepare .config
+        run: |
+          # If setup-ps2 exists in repo, run it (like the old HOWTO)
+          if [ -x ./setup-ps2 ]; then
+            ./setup-ps2
+          else
+            echo "setup-ps2 not found or not executable, skipping"
+          fi
+
+          # Generate config; if it asks questions, default answers
+          yes "" | make oldconfig || true
+
+          # Force ext2 built in (HOWTO requires CONFIG_EXT2_FS=y)
+          if grep -q 'CONFIG_EXT2_FS=m' .config; then
+            perl -i.bak -pe 's/CONFIG_EXT2_FS=m/CONFIG_EXT2_FS=y/' .config
+          fi
+
+          echo "Final CONFIG_EXT2_FS line:"
+          grep CONFIG_EXT2_FS .config || true
+
+      - name: Build dependencies
+        run: |
+          make dep
+
+      - name: Build kernel
+        run: |
+          # If the tree uses a different target (e.g. xrvmlinux), change here
+          make -j$(nproc) vmlinux
+
+      - name: Build modules (optional)
+        run: |
+          # Some 2.4 trees may fail modules build with modern toolchains; ignore failure
+          make -j$(nproc) modules || true
+
+      - name: List outputs
+        run: |
+          ls -R .
+          file vmlinux || true
+
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps2-kernel-build
+          path: |
+            vmlinux
+            System.map
+            .config
+          if-no-files-found: warn
