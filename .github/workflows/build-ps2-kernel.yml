@@ -65,7 +65,9 @@ jobs:
               echo "Building modules (optional)..."
               make -j"$(nproc)" modules || true
               make modules_install INSTALL_MOD_PATH=/work/linux-2.4.17_ps2/rootfs
-              chown -R $(id -u):$(id -g) /work/linux-2.4.17_ps2/rootfs
+              tar cvf kernel-modules-2.4.17.tar -C /work/linux-2.4.17_ps2/rootfs/lib/modules .
+              gzip kernel-modules-2.4.17.tar
+              mv kernel-modules-2.4.17.tar.gz /work/linux-2.4.17_ps2/rootfs/
 
               echo "Preparing output..."
               ls -l rootfs

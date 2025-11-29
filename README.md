@@ -5,7 +5,7 @@ Linux Kernel 2.4.17 for PS2 PSBBN with modifications for [PSBBN Definitive Patch
 
 Launch docker on your host machine
 
-    docker run --rm -it akuhak/ps2-legacy-woody-slim:latest /bin/bash
+    docker run --rm -it akuhak/ps2-legacy-woody-slim:latest /bin/bash -v "$(pwd)":/usr/src/project -w /usr/src/project
 
 Inside docker run folllowing commands:
 
