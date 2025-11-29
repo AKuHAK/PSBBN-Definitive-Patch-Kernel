@@ -67,13 +67,12 @@ jobs:
               make modules_install INSTALL_MOD_PATH=/work/linux-2.4.17_ps2/rootfs
               tar cvf kernel-modules-2.4.17.tar -C /work/linux-2.4.17_ps2/rootfs/lib/modules .
               gzip kernel-modules-2.4.17.tar
-              mv kernel-modules-2.4.17.tar.gz /work/linux-2.4.17_ps2/rootfs/
 
               echo "Preparing output..."
               ls -l rootfs
-              mkdir -p rootfs/boot
-              cp vmlinux rootfs/boot/vmlinux-2.4.17_mvl21
-              cp System.map rootfs/boot/System.map-2.4.17_mvl21
+              mkdir -p boot
+              cp vmlinux boot/vmlinux-2.4.17_mvl21
+              cp System.map boot/System.map-2.4.17_mvl21
             '
 
 
@@ -82,5 +81,6 @@ jobs:
         with:
           name: ps2-kernel-build
           path: |
-            linux-2.4.17_ps2/rootfs
+            linux-2.4.17_ps2/boot
+            linux-2.4.17_ps2/kernel-modules-2.4.17.tar.gz
           if-no-files-found: warn
