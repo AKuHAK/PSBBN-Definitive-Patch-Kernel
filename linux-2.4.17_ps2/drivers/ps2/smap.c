@@ -209,7 +209,7 @@ smap_start_xmit2(struct smap_chan *smap)
 
 		if (smap->flags & SMAP_F_DMA_TX_ENABLE) {
 			memcpy((char *)(smap->txdma_ibuf + smap->txdma_request.size), skb->data, skb->len);
-			smap->txdma_request.sdd[i].i_addr = 
+			smap->txdma_request.sdd[i].i_addr =
 				(unsigned int)(smap->txdma_ibuf + smap->txdma_request.size);
 		} else {
 			smap->txdma_request.sdd[i].i_addr = 0;
@@ -271,10 +271,37 @@ smappiosend:
 		SMAPREG16(smap,SMAP_TXFIFO_WR_PTR) =
 				smap->txdma_request.sdd[0].f_addr;
 		datap = (u_int32_t *)smap->txbuf;
+#if 0
 		for (i = 0; i < smap->txdma_request.sdd[0].size; i += 4) {
 							/* memory -> FIFO */
 			SMAPREG32(smap,SMAP_TXFIFO_DATA) = *datap++;
 		}
+#else
+	/* use assembly for speed  --achurch 2002/02/24 */
+	if (txlen & 4) {
+		SMAPREG32(smap,SMAP_TXFIFO_DATA) = *datap++;
+	}
+	if (txlen >= 8) {
+		register u_int32_t *src __asm__("$12");
+		register u_int32_t *dest __asm__("$13");
+		register u_int32_t count __asm__("$14");
+		src = datap;
+		dest = (u_int32_t *)smap->base;
+		count = txlen - 8;
+		asm(".Ltx:\
+			slt	$15,$0,$14;\
+			lw	$8,0($12);\
+			addi	$14,$14,-8;\
+			lw	$9,4($12);\
+			addiu	$12,$12,8;\
+			sw	$8,0x1100($13);\
+			sw	$9,0x1100($13);\
+			bnez	$15,.Ltx"
+		    : /* no outputs */
+		    : "r" (src), "r" (dest), "r" (count)
+		    : "$8", "$9", "$15");
+	}
+#endif
 		spin_unlock_irqrestore(&smap->spinlock, flags);
 
 		/* re-queue unsend packets */
@@ -569,7 +596,7 @@ smap_rx_intr(struct net_device *net_dev)
 			}
 			if (smap->flags & SMAP_F_PRINT_MSG) {
 				printk("%s:Rx intr(%d): [%d]=stat(0x%04x, 0x%04x), len(%d, 0x%04x), ptr(0x%04x)\n", net_dev->name, i, l_rxbdi, rxstat,rxbd->ctrl_stat,rxbd->length,rxbd->length,rxbd->pointer);
-			} 
+			}
 			pkt_err |= (1 << i);
 			break;
 		}
@@ -2095,7 +2122,7 @@ smap_eeprom_get_data(struct smap_chan *smap)
 static void
 smap_eeprom_start_op(struct smap_chan *smap, int op)
 {
-	/* set port direction */    
+	/* set port direction */
 	SMAPREG8(smap, SMAP_PIOPORT_DIR) = (PP_SCLK | PP_CSEL | PP_DIN);
 
 	/* rise chip select */
@@ -2649,7 +2676,7 @@ smap_thread(void *arg)
 
 	/* Set the name of this process. */
 	sprintf(current->comm, "smap");		/* up to 16B */
-        
+
 	unlock_kernel();
 
 	smap->smaprun_task = current;

@@ -355,7 +355,7 @@ int __init ps2sysconf_init(void)
 			dev->valid = 1;
 			ndevs++;
             /* update '/proc/ps2sysconf' */
-            dev->update_proc(dev, dev->data, dev->nblks * SB_CDVD_CFG_BLKSIZE);
+            // dev->update_proc(dev, dev->data, dev->nblks * SB_CDVD_CFG_BLKSIZE);
 
 #ifdef PS2SYSCONF_DEBUG
 			if (ps2sysconf_debug)
