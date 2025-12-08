@@ -147,6 +147,7 @@ static ssize_t
 ps2sysconf_write(struct file *filp, const char *buf, size_t size, loff_t *off)
 {
 	int res, stat;
+	return -EPERM;
 	struct ps2sysconf_dev *dev = filp->private_data;
 	u_char data[PS2SYSCONF_MAXDATASIZE];
 
