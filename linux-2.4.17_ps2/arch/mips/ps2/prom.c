@@ -106,6 +106,8 @@ void __init prom_init(int argc, char **argv, char **envp)
 	       bootinfo, oldbootinfo ? "(old style)" : "");
 	printk("boot option string at %p: %s\n",
 	       ps2_bootinfo->opt_string, arcs_cmdline);
+
+    *(unsigned char *)0x800081b0 = 0; /* disable BWLINUX folder on mcfs check */
 }
 
 void __init prom_free_prom_memory(void)
