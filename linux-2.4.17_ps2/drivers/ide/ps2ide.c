@@ -6,8 +6,11 @@
 #include <asm/hdreg.h>
 #include <asm/bootinfo.h>
 #include <asm/ps2/irq.h>
+#include <asm/ps2/speed.h>
 
 #include "ide_modes.h"
+
+#define IFC_ATA_RST	0x80
 
 #ifdef DEBUG
 #define DPRINT(fmt, args...) \
@@ -32,6 +35,18 @@ extern int ps2_pccard_present;
 static int ps2_ide_offsets[IDE_NR_PORTS] __initdata = {
 	0x00, 0x02, 0x04, 0x06, 0x08, 0x0a, 0x0c, 0x0e, 0x1c, -1
 };
+
+static void ps2_dev9_reset(void)
+{
+	volatile u8 *if_ctrl_reg = SPD_R_IF_CTRL;
+	u8 if_ctrl;
+
+	printk(KERN_INFO "ps2ide: Resetting DEV9 for GameStar adapter...\n");
+	if_ctrl = *if_ctrl_reg;
+	*if_ctrl_reg = IFC_ATA_RST;
+	udelay(100);
+	*if_ctrl_reg = if_ctrl;
+}
 
 static void ps2_ide_select(ide_drive_t *drive)
 {
@@ -111,7 +126,7 @@ static int ps2_ide_request_irq(unsigned int irq,
                                 void *dev_id)
 {
 	return request_irq(irq, handler, flags|SA_SHIRQ, device, dev_id);
-}			
+}
 
 static void ps2_ide_free_irq(unsigned int irq, void *dev_id)
 {
@@ -173,6 +188,8 @@ void __init ps2_hdd_register(void)
 	hw_regs_t hw;
 	ide_hwif_t *hwif;
 	int index;
+
+	ps2_dev9_reset();
 
 	ide_setup_ports(&hw, (ide_ioreg_t)PS2_HDD_BASE, ps2_ide_offsets,
 			0, 0, NULL, IRQ_SBUS_PCIC);
