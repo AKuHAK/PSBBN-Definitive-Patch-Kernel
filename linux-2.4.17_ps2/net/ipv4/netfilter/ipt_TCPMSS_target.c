@@ -10,7 +10,7 @@
 #include <net/tcp.h>
 
 #include <linux/netfilter_ipv4/ip_tables.h>
-#include <linux/netfilter_ipv4/ipt_TCPMSS.h>
+#include <linux/netfilter_ipv4/ipt_TCPMSS_target.h>
 
 #if 0
 #define DEBUGP printk
@@ -118,7 +118,7 @@ ipt_tcpmss_target(struct sk_buff **pskb,
 
 			DEBUGP(KERN_INFO "ipt_tcpmss_target: %u.%u.%u.%u:%hu"
 			       "->%u.%u.%u.%u:%hu changed TCP MSS option"
-			       " (from %u to %u)\n", 
+			       " (from %u to %u)\n",
 			       NIPQUAD((*pskb)->nh.iph->saddr),
 			       ntohs(tcph->source),
 			       NIPQUAD((*pskb)->nh.iph->daddr),
@@ -221,7 +221,7 @@ ipt_tcpmss_checkentry(const char *tablename,
 	}
 
 
-	if((tcpmssinfo->mss == IPT_TCPMSS_CLAMP_PMTU) && 
+	if((tcpmssinfo->mss == IPT_TCPMSS_CLAMP_PMTU) &&
 			((hook_mask & ~((1 << NF_IP_FORWARD)
 			   	| (1 << NF_IP_LOCAL_OUT)
 			   	| (1 << NF_IP_POST_ROUTING))) != 0)) {

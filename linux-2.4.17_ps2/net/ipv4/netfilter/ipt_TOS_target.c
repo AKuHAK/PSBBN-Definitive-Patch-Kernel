@@ -5,7 +5,7 @@
 #include <net/checksum.h>
 
 #include <linux/netfilter_ipv4/ip_tables.h>
-#include <linux/netfilter_ipv4/ipt_TOS.h>
+#include <linux/netfilter_ipv4/ipt_TOS_target.h>
 
 static unsigned int
 target(struct sk_buff **pskb,
