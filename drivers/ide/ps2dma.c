@@ -35,6 +35,10 @@
 #include <asm/ps2/dmarelay.h>
 #include <asm/ps2/speed.h>
 
+#ifndef XFER_UDMA_6
+#define XFER_UDMA_6	0x46
+#endif
+
 #define DMA_MAX_SEGMENTS	16
 
 #define IFC_ATA_RST	0x80
@@ -62,6 +66,10 @@ struct ps2_dmatable {
 #endif
 	ps2sif_clientdata_t cd_ata;
 	ps2sif_clientdata_t cd_ata_end;
+};
+
+struct ps2ide_dma_priv {
+	int is_gamestar;
 };
 
 #ifdef GATHER_WRITE_DATA
@@ -230,6 +238,7 @@ static int ps2_ide_dmaproc (ide_dma_action_t func, ide_drive_t *drive)
 {
 	ide_hwif_t *hwif = HWIF(drive);
 	struct ps2_dmatable *t = (struct ps2_dmatable *)hwif->dmatable_cpu;
+	struct ps2ide_dma_priv *priv = hwif->hwif_data;
 	struct ata_dma_request *req = &t->ata_dma_request;
 	int ret;
 
@@ -250,9 +259,9 @@ static int ps2_ide_dmaproc (ide_dma_action_t func, ide_drive_t *drive)
 		/* only ide-disk DMA works... */
 		drive->using_dma = hwif->autodma && drive->media == ide_disk;
 
-		/* TODO: always UltraDMA mode 4 */
 		if (drive->using_dma) {
-			ide_config_drive_speed(drive, XFER_UDMA_4);
+			/* Force UDMA6 for testing. Warning: DEV9 controller may not sync! */
+			ide_config_drive_speed(drive, XFER_UDMA_6);
 		}
 		return 0;
 
@@ -264,6 +273,17 @@ static int ps2_ide_dmaproc (ide_dma_action_t func, ide_drive_t *drive)
 			return 0;
 		if (!ps2_ide_build_dmatable(0, drive))
 			return 1;	/* try PIO instead of DMA */
+		if (priv && priv->is_gamestar) {
+			volatile u16 *if_ctrl_reg = (volatile u16 *)(DEV9M_BASE + 0x64);
+			volatile u16 *xfr_ctrl_reg = (volatile u16 *)(DEV9M_BASE + 0x32);
+			u16 val;
+
+			*(volatile u16 *)(DEV9M_BASE + 0x38) = 3;
+			val = *if_ctrl_reg & 1;
+			val |= 0x4e; /* ATA_DIR_READ */
+			*if_ctrl_reg = val;
+			*xfr_ctrl_reg = 0x86; /* 0 | 0x86 (dir | 0x86) */
+		}
 		req->command = WIN_READDMA;
 		req->devctrl = drive->ctl;
 		drive->waiting_for_dma = 1;
@@ -303,6 +323,17 @@ static int ps2_ide_dmaproc (ide_dma_action_t func, ide_drive_t *drive)
 			return 0;
 		if (!ps2_ide_build_dmatable(1, drive))
 			return 1;	/* try PIO instead of DMA */
+		if (priv && priv->is_gamestar) {
+			volatile u16 *if_ctrl_reg = (volatile u16 *)(DEV9M_BASE + 0x64);
+			volatile u16 *xfr_ctrl_reg = (volatile u16 *)(DEV9M_BASE + 0x32);
+			u16 val;
+
+			*(volatile u16 *)(DEV9M_BASE + 0x38) = 3;
+			val = *if_ctrl_reg & 1;
+			val |= 0x4c; /* ATA_DIR_WRITE */
+			*if_ctrl_reg = val;
+			*xfr_ctrl_reg = 0x87; /* 1 | 0x86 (dir | 0x86) */
+		}
 		req->command = WIN_WRITEDMA;
 		drive->waiting_for_dma = 1;
 		ide_set_handler(drive, &ide_dma_intr, WAIT_CMD, NULL);
@@ -399,17 +430,20 @@ int ide_release_dma (ide_hwif_t *hwif)
 {
 	if (hwif->dmatable_cpu)
 		kfree((void *)hwif->dmatable_cpu);
+	if (hwif->hwif_data)
+		kfree(hwif->hwif_data);
 	return 1;
 }
 
 static void ps2dma_wakeup(void *p)
 {
-	complete((struct completion *)p);    
+	complete((struct completion *)p);
 }
 
 void __init ps2_ide_setup_dma (ide_hwif_t *hwif)
 {
 	struct ps2_dmatable *t;
+	struct ps2ide_dma_priv *priv;
 	int ret;
 	int i;
 	int *dma_max_segments;
@@ -421,6 +455,21 @@ void __init ps2_ide_setup_dma (ide_hwif_t *hwif)
 	if (t == NULL)
 		goto error;
 	memset(t, 0, sizeof(struct ps2_dmatable));
+
+	priv = kmalloc(sizeof(struct ps2ide_dma_priv), GFP_KERNEL);
+	if (priv == NULL) {
+		kfree(t);
+		goto error;
+	}
+	/* Check for Gamestar adapter */
+	if (*(volatile u16 *)(DEV9M_BASE + 0x20) != 1) {
+		printk(" (gamestar compatible)");
+		priv->is_gamestar = 1;
+	} else {
+		priv->is_gamestar = 0;
+	}
+	hwif->hwif_data = priv;
+
 #ifdef GATHER_WRITE_DATA
 	t->dma_buffer = dma_buffer;
 #endif
@@ -506,5 +555,9 @@ void __init ps2_ide_setup_dma (ide_hwif_t *hwif)
 	return;
 
 error:
+	if (t)
+		kfree(t);
+	if (priv)
+		kfree(priv);
 	printk(" -- cannot bind to DMA relay module\n");
 }
