@@ -1,0 +1,44 @@
+# Compiled kernel and outputs
+vmlinux
+System.map
+rootfs/
+boot/
+*.tar
+*.tar.gz
+
+# Objects and libraries
+*.o
+*.a
+*.s
+
+# Generated MontaVista build targets
+.hhl_cross_compile
+.hhl_target_cpu
+.hhl_target_installdir
+.hhl_target_lspname
+
+# Generated config and header files
+.config
+.config.old
+include/linux/autoconf.h
+include/linux/version.h
+include/linux/modversions.h
+include/config/
+include/asm-mips/offset.h
+arch/mips/tools/offset.s
+arch/mips/ld.script
+
+# Built tools
+scripts/mkdep
+scripts/split-include
+drivers/char/conmakehash
+drivers/char/consolemap_deftbl.c
+drivers/net/hamradio/soundmodem/gentbl
+drivers/net/hamradio/soundmodem/sm_tbl_*.h
+
+# Dependency files
+*.depend
+.depend
+
+# OS files
+.DS_Store

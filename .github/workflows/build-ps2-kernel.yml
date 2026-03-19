@@ -1,0 +1,81 @@
+name: Build PS2 2.4.17 Kernel (ps2toolchain)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      ARCH: mips
+      CROSS_COMPILE: mipsEEel-linux-
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Show host info
+        run: |
+          uname -a
+          docker version
+
+      - name: Pull PS2 toolchain image
+        run: |
+          docker pull akuhak/ps2-legacy-woody-slim:latest
+
+      - name: Build kernel inside PS2 container
+        run: |
+          docker run --rm \
+            -e ARCH \
+            -e CROSS_COMPILE \
+            -v "${GITHUB_WORKSPACE}:/work" \
+            -w "/work" \
+            akuhak/ps2-legacy-woody-slim:latest \
+            sh -c '
+              echo "Toolchain info:"
+              which "${CROSS_COMPILE}gcc" || echo "gcc not found"
+              "${CROSS_COMPILE}gcc" -v || true
+              uname -a
+
+              echo "Running setup-ps2 (if present)..."
+              if [ -x ./setup-ps2 ]; then
+                ./setup-ps2
+              else
+                echo "setup-ps2 not found or not executable, skipping"
+              fi
+
+              echo "Running make oldconfig..."
+              yes "" | make oldconfig || true
+
+              echo "Running make dep..."
+              make dep
+
+              echo "Detecting CPU cores..."
+              JOBS=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2)
+              echo "Building kernel with $JOBS jobs..."
+              make -j"$JOBS" vmlinux
+
+              echo "Building modules (optional)..."
+              make -j"$JOBS" modules || true
+              make modules_install INSTALL_MOD_PATH=/work/rootfs
+              tar cvf kernel-modules-2.4.17.tar -C /work/rootfs/lib/modules .
+              gzip kernel-modules-2.4.17.tar
+
+              echo "Preparing output..."
+              ls -l rootfs
+              mkdir -p boot
+              cp vmlinux boot/vmlinux-2.4.17_mvl21
+              cp System.map boot/System.map-2.4.17_mvl21
+            '
+
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ps2-kernel-build
+          path: |
+            boot
+            kernel-modules-2.4.17.tar.gz
+          if-no-files-found: warn
