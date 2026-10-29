@@ -319,6 +319,27 @@ static void sif1_dma_handler(int irq, void *dev_id, struct pt_regs *regs)
     spin_unlock(&ps2sif_dma_lock);
 }
 
+typedef struct t_SifCmdHeader
+{
+	u32 size;
+	void *dest;
+	int cid;
+	u32 unknown;
+} SifCmdHeader_t;
+
+static uint32_t usrCmdHandler[256];
+
+typedef struct {
+	struct t_SifCmdHeader    sifcmd;
+	u32 data[16];
+} iop_sifCmdBufferIrq_t;
+
+void handleRPCIRQ(iop_sifCmdBufferIrq_t *sifCmdBufferIrq, void *arg)
+{
+	extern void handleSimulatedIRQ(int irq);
+
+	handleSimulatedIRQ(sifCmdBufferIrq->data[0]);
+}
 
 /*
  *  Initialize
@@ -326,7 +347,17 @@ static void sif1_dma_handler(int irq, void *dev_id, struct pt_regs *regs)
 
 int __init ps2sif_init(void)
 {
+	struct sb_sifaddcmdhandler_arg addcmdhandlerparam;
+	struct sb_sifsetcmdbuffer_arg setcmdhandlerbufferparam;
+
     init_waitqueue_head(&ps2sif_dma_waitq);
+
+    setcmdhandlerbufferparam.db = usrCmdHandler;
+    setcmdhandlerbufferparam.size = sizeof(usrCmdHandler) / 8;
+
+	addcmdhandlerparam.fid = 0x20;
+	addcmdhandlerparam.func = (void *)handleRPCIRQ;
+	addcmdhandlerparam.data = NULL;
 
     if (sbios(SB_SIFINIT, 0) < 0)
 	return -1;
@@ -336,6 +367,13 @@ int __init ps2sif_init(void)
 	return -1;
     if (request_irq(IRQ_DMAC_6, sif1_dma_handler, SA_INTERRUPT, "SIF1 DMA", NULL))
 	return -1;
+	if (sbios(SB_SIFSETCMDBUFFER, &setcmdhandlerbufferparam) < 0) {
+		printk("Failed to initialize SIF cmd handler (1).\n");
+	} else {
+		if (sbios(SB_SIFADDCMDHANDLER, &addcmdhandlerparam) < 0) {
+			printk("Failed to initialize SIF IRQ handler.\n");
+		}
+	}
     if (sbios(SB_SIFINITRPC, 0) < 0)
 	return -1;
 
