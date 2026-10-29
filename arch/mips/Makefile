@@ -114,8 +114,10 @@ endif
 # arch/mips/ramdisk
 #
 ifdef CONFIG_BLK_DEV_INITRD 
+ifdef CONFIG_EMBEDDED_RAMDISK
 CORE_FILES      += arch/mips/ramdisk/ramdisk.o
 SUBDIRS		+= arch/mips/ramdisk
+endif
 endif
 
 
