@@ -363,6 +363,22 @@ out:
 	return 1;
 }
 
+void handleSimulatedIRQ(int irq)
+{
+	struct irqaction * action;
+
+	if (irq < NR_IRQS) {
+		irq_desc_t *desc = irq_desc + irq;
+
+		action = desc->action;
+
+		while (action) {
+			action->handler(irq, action->dev_id, NULL);
+			action = action->next;
+		}
+	}
+}
+
 /**
  *	request_irq - allocate an interrupt line
  *	@irq: Interrupt line to allocate

@@ -26,6 +26,7 @@ ps2rm-objs			:= rm.o
 ps2sysconf-objs			:= sysconf.o
 ps2sysproc-objs			:= sysproc.o
 ps2smap-objs			:= smap.o
+ps2smaprpc-objs			:= smaprpc.o
 ps2dev-objs			:= ps2dev.o ps2event.o ps2mem.o ps2dma.o ps2image.o
 
 obj-$(CONFIG_PS2_PAD)		+= ps2pad.o
@@ -37,6 +38,7 @@ obj-$(CONFIG_PS2_RM)		+= ps2rm.o
 obj-$(CONFIG_PS2_SYSCONF)	+= ps2sysconf.o 
 obj-$(CONFIG_PS2_SYSPROC)	+= ps2sysproc.o 
 obj-$(CONFIG_PS2_ETHER_SMAP)	+= ps2smap.o
+obj-$(CONFIG_PS2_ETHER_SMAP)	+= ps2smaprpc.o
 obj-$(CONFIG_PS2_PS2DEV)	+= ps2devmod.o
 obj-y				+= mcfs/ps2mcfsarc.o
 
@@ -60,5 +62,7 @@ ps2sysproc.o: $(ps2sysproc-objs)
 	$(LD) -r -o $@ $(ps2sysproc-objs)
 ps2smap.o: $(ps2smap-objs)
 	$(LD) -r -o $@ $(ps2smap-objs)
+ps2smaprpc.o: $(ps2smaprpc-objs)
+	$(LD) -r -o $@ $(ps2smaprpc-objs)
 ps2devmod.o: $(ps2dev-objs)
 	$(LD) -r -o $@ $(ps2dev-objs)
