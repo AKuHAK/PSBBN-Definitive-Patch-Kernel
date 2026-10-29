@@ -121,11 +121,11 @@ int handle_IRQ_event(unsigned int irq, struct pt_regs * regs, struct irqaction *
 	if (!(action->flags & SA_INTERRUPT))
 		__sti();
 
-	do {
+	while (action) {
 		status |= action->flags;
 		action->handler(irq, action->dev_id, regs);
 		action = action->next;
-	} while (action);
+	}
 	if (status & SA_SAMPLE_RANDOM)
 		add_interrupt_randomness(irq);
 	__cli();
