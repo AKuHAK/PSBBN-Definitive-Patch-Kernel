@@ -107,6 +107,7 @@ if [ "$CONFIG_XFS_FS" != "n" ]; then
        define_bool CONFIG_HAVE_XFS_DMAPI y
     fi
 fi
+tristate 'PlayStation 2 HDD filesystem (PFS) support' CONFIG_PS2_FS
 
 if [ "$CONFIG_NET" = "y" ]; then
 
