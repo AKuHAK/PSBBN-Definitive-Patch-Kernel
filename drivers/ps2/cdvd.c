@@ -45,6 +45,9 @@
 #define DISC_NODISC	1
 #define DISC_RETRY	2
 
+#define DVD_DATA_SECT_SIZE 2064
+#define DVD_DATA_OFFSET 12
+
 /*
  * data types
  */
@@ -288,9 +291,15 @@ ps2cdvd_check_cache(void)
 	DPRINT(DBG_READ, "REQ %p: sec=%ld  n=%ld  buf=%p\n",
 	       CURRENT, CURRENT->sector,
 	       CURRENT->current_nr_sectors, CURRENT->buffer);
-	memcpy(CURRENT->buffer,
-	       ps2cdvd.databuf + DATA_SECT_SIZE * (CURRENT->sector/4 - ps2cdvd.databuf_addr),
-	       DATA_SECT_SIZE);
+	if (ps2cdvd.disc_type == SCECdDVDV) {
+		memcpy(CURRENT->buffer,
+		       ps2cdvd.databuf + DVD_DATA_OFFSET + DVD_DATA_SECT_SIZE * (CURRENT->sector/4 - ps2cdvd.databuf_addr),
+		       DATA_SECT_SIZE);
+	} else {
+		memcpy(CURRENT->buffer,
+		       ps2cdvd.databuf + DATA_SECT_SIZE * (CURRENT->sector/4 - ps2cdvd.databuf_addr),
+		       DATA_SECT_SIZE);
+	}
 	spin_lock_irqsave(&io_request_lock, flags);
 	end_request(1);
 	spin_unlock_irqrestore(&io_request_lock, flags);
@@ -452,9 +461,16 @@ ps2cdvd_thread(void *arg)
 	       sn * 4, ps2cdvd_databuf_size, ps2cdvd.databuf,
 	       nsects != ps2cdvd_databuf_size ? "(retry)" : "");
 	ps2cdvd.databuf_nsects = 0;
-	if (ps2cdvdcall_read(sn, nsects, ps2cdvd.databuf,
-			     &ps2cdvd.data_mode) != 0) {
-	    NEW_STATE(STAT_CHECK_DISC);
+	if (ps2cdvd.disc_type == SCECdDVDV) {
+		if (ps2cdvdcall_read_dvd(sn, nsects, ps2cdvd.databuf,
+				     &ps2cdvd.data_mode) != 0) {
+		    NEW_STATE(STAT_CHECK_DISC);
+		}
+	} else {
+		if (ps2cdvdcall_read(sn, nsects, ps2cdvd.databuf,
+				     &ps2cdvd.data_mode) != 0) {
+		    NEW_STATE(STAT_CHECK_DISC);
+		}
 	}
 	res = ps2cdvdcall_geterror();
 	if (res == SCECdErNO) {
@@ -684,12 +700,22 @@ checkdisc()
      *  read label
      */
     if (read_label) {
-	if (ps2cdvdcall_read(16, 1, ps2cdvd.labelbuf, &ps2cdvd.label_mode)!=0||
-	    ps2cdvdcall_geterror() != SCECdErNO) {
-	    DPRINT(DBG_DIAG, "read() failed\n");
-	    res = DISC_ERROR;
-	    goto error_out;
+	if (ps2cdvd.disc_type == SCECdDVDV) {
+		if (ps2cdvdcall_read_dvd(16, 1, ps2cdvd.labelbuf, &ps2cdvd.label_mode)!=0||
+		    ps2cdvdcall_geterror() != SCECdErNO) {
+		    DPRINT(DBG_DIAG, "read() failed\n");
+		    res = DISC_ERROR;
+		    goto error_out;
+		}
+	} else {
+		if (ps2cdvdcall_read(16, 1, ps2cdvd.labelbuf, &ps2cdvd.label_mode)!=0||
+		    ps2cdvdcall_geterror() != SCECdErNO) {
+		    DPRINT(DBG_DIAG, "read() failed\n");
+		    res = DISC_ERROR;
+		    goto error_out;
+		}
 	}
+	memcpy(ps2cdvd.labelbuf, ps2cdvd.labelbuf + DVD_DATA_OFFSET, DATA_SECT_SIZE);
 	ps2cdvd.label_valid = 1;
 	DPRINT(DBG_DLOCK, "label is valid\n");
 #ifdef PS2CDVD_DEBUG
@@ -719,6 +745,7 @@ checkdisc()
 #endif
     }
 
+#if 0 /* TBD: This seems not to be needed and may lead to hang at startup (no RPC response). */
     /*
      *  check tray count
      */
@@ -732,6 +759,7 @@ checkdisc()
 	res = DISC_RETRY;
 	goto error_out;
     }
+#endif
 
     return (DISC_OK);
 
@@ -752,13 +780,21 @@ spindown(void)
     case SCECdPSCDDA:		/* PS CD DA */
     case SCECdPSCD:		/* PS CD */
     case SCECdPS2DVD:		/* PS2 DVD */
-    case SCECdDVDV:		/* DVD video */
     case SCECdIllgalMedia:	/* illegal media */
     case SCECdUNKNOWN:		/* unknown */
 	DPRINT(DBG_INFO, "spindown: data\n");
 	mode = ps2cdvd.data_mode;
 	mode.spindlctrl = SCECdSpinX2;
 	if (ps2cdvdcall_read(16, 1, ps2cdvd.databuf, &mode) != 0)
+	    DPRINT(DBG_DIAG, "spindown: data failed\n");
+	ps2cdvd_invalidate_discinfo();
+	break;
+
+    case SCECdDVDV:		/* DVD video */
+	DPRINT(DBG_INFO, "spindown: data\n");
+	mode = ps2cdvd.data_mode;
+	mode.spindlctrl = SCECdSpinX2;
+	if (ps2cdvdcall_read_dvd(16, 1, ps2cdvd.databuf, &mode) != 0)
 	    DPRINT(DBG_DIAG, "spindown: data failed\n");
 	ps2cdvd_invalidate_discinfo();
 	break;
@@ -860,7 +896,7 @@ int __init ps2cdvd_init(void)
 	 * allocate buffer
 	 */
 	DPRINT(DBG_VERBOSE, "init: allocate diaklabel buffer\n");
-	ps2cdvd.labelbuf = kmalloc(2048, GFP_KERNEL);
+	ps2cdvd.labelbuf = kmalloc(DVD_DATA_SECT_SIZE, GFP_KERNEL);
 	if (ps2cdvd.labelbuf == NULL) {
 		printk(KERN_ERR "ps2cdvd: Can't allocate buffer\n");
 		ps2cdvd_cleanup();
