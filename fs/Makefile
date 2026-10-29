@@ -68,6 +68,7 @@ subdir-$(CONFIG_SUN_OPENPROMFS)	+= openpromfs
 
 subdir-$(CONFIG_XFS_DMAPI)	+= xfs_dmapi
 subdir-$(CONFIG_XFS_FS)		+= xfs
+subdir-$(CONFIG_PS2_FS)		+= ps2fs
 mod-subdirs			+= xfs
 # xfs_support is used by xfs and a couple of other SGI components.  Because CML1
 # does not correctly handle inter-menu dependencies, set CONFIG_XFS_SUPPORT
