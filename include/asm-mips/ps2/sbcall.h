@@ -608,6 +608,8 @@ struct sbr_cdvd_rcbyctl_arg {
     int stat;
 };
 
+#define SBR_CDVD_READ_DVD       196
+
 /*
  * Remote Controller
  */
