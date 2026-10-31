@@ -16,6 +16,7 @@ tristate '  Support for PS2 Sound device' CONFIG_PS2_SD
 dep_mbool '    Enable alternate PCM device' CONFIG_PS2_SD_ALTPCM  $CONFIG_PS2_SD
 tristate '  Support for PS2 Memory Card drive' CONFIG_PS2_MC
 dep_tristate '  Support for PS2 Memory Card File System' CONFIG_PS2_MCFS $CONFIG_PS2_MC
+tristate '  Support for PS2 MMCE block driver (SD2PSX / MX4SIO)' CONFIG_PS2_MMCE
 tristate '  Support for PS2 Remote Controller device' CONFIG_PS2_RM
 tristate '  Support for PS2 System Configuration device' CONFIG_PS2_SYSCONF
 tristate '  Support for PS2 System proc' CONFIG_PS2_SYSPROC

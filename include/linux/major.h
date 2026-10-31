@@ -172,6 +172,7 @@
 #define PS2CDVD_MAJOR	243	/* PS2 CD/DVD */
 #define PS2PAD_MAJOR	244	/* PS2 PAD */
 #define PS2MC_MAJOR	245	/* PS2 Memory Card */
+#define PS2MMCE_MAJOR	246	/* PS2 Multipurpose Memory Card Emulator (SD2PSX/MemCardPRO2) */
 #define PS2RM_MAJOR	247	/* PS2 Remote Controller */
 #define PS2SYSCONF_MAJOR 248	/* PS2 System configration */
 #define AKMEM_MAJOR	249	/* AKMEM */
