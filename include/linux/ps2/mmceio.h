@@ -126,3 +126,4 @@ struct ps2mmce_gameid_req {
 #define PS2MMCE_IOCRESET		_IOW(PS2MMCE_IOCTL, 10, int)
 
 #endif /* _PS2MMCEIO_H_ */
+
