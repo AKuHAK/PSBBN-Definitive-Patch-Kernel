@@ -1001,3 +1001,4 @@ module_exit(ps2mmce_exit);
 MODULE_AUTHOR("AKuHAK");
 MODULE_DESCRIPTION("PlayStation 2 MMCE Block Device Driver (SD2PSX/MemCardPRO2)");
 MODULE_LICENSE("GPL");
+
