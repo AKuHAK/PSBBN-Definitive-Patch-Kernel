@@ -23,6 +23,7 @@ ps2cdvd-objs			:= cdvd.o cdvdaltdev.o cdvddev.o cdvdutil.o
 ps2sd-objs			:= sd.o sdmixer.o sdcnv.o iopmem.o
 ps2mc-objs			:= mc.o mcdir.o mcfile.o mcdev.o
 ps2rm-objs			:= rm.o
+ps2mmce-objs			:= mmce.o
 ps2sysconf-objs			:= sysconf.o
 ps2sysproc-objs			:= sysproc.o
 ps2smap-objs			:= smap.o
@@ -34,6 +35,7 @@ obj-$(CONFIG_PS2_PAD_JS)	+= ps2js.o
 obj-$(CONFIG_PS2_CDVD)		+= ps2cdvd.o
 obj-$(CONFIG_PS2_SD)		+= ps2sd.o
 obj-$(CONFIG_PS2_MC)		+= ps2mc.o
+obj-$(CONFIG_PS2_MMCE)		+= ps2mmce.o
 obj-$(CONFIG_PS2_RM)		+= ps2rm.o
 obj-$(CONFIG_PS2_SYSCONF)	+= ps2sysconf.o 
 obj-$(CONFIG_PS2_SYSPROC)	+= ps2sysproc.o 
@@ -54,6 +56,8 @@ ps2sd.o: $(ps2sd-objs)
 	$(LD) -r -o $@ $(ps2sd-objs)
 ps2mc.o: $(ps2mc-objs)
 	$(LD) -r -o $@ $(ps2mc-objs)
+ps2mmce.o: $(ps2mmce-objs)
+	$(LD) -r -o $@ $(ps2mmce-objs)
 ps2rm.o: $(ps2rm-objs)
 	$(LD) -r -o $@ $(ps2rm-objs)
 ps2sysconf.o: $(ps2sysconf-objs)
