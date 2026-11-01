@@ -14912,6 +14912,23 @@ CONFIG_VFAT_FS
   say M here and read <file:Documentation/modules.txt>.  The module
   will be called vfat.o.
 
+exFAT fs support
+CONFIG_EXFAT_FS
+  This option provides read/write support for exFAT, the file system
+  used on SDXC cards and on most USB flash drives larger than 32 GB.
+  Unlike FAT32 it can store files of 4 GB and more.
+
+  The driver is built on the FatFs module by ChaN.  Only devices with
+  512-byte sectors and volumes up to 2 TB are supported.  Formatting
+  and checking need the userspace mkfs.exfat and fsck.exfat tools.
+  Please read <file:Documentation/filesystems/exfat.txt> for the mount
+  options and limitations.
+
+  If you want to compile this as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want),
+  say M here and read <file:Documentation/modules.txt>.  The module
+  will be called exfat.o.
+
 Unix-like file system on top of standard MSDOS fs
 CONFIG_UMSDOS_FS
   Say Y here if you want to run Linux from within an existing DOS

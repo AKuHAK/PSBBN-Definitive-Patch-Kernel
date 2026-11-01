@@ -1,0 +1,69 @@
+exFAT filesystem
+================
+
+exFAT is the filesystem of SDXC cards and of most USB flash drives larger
+than 32 GB.  Unlike FAT32 it stores files of 4 GB and more.  This driver
+reads and writes exFAT volumes; it is built on the FatFs module by ChaN
+(see fs/exfat/README).
+
+Usage
+-----
+
+  insmod exfat              (when built as a module)
+  mount -t exfat /dev/sda1 /mnt/usb
+
+The type must be given with -t: the old mount program does not recognise
+exFAT by itself.  USB drives also need the usb-storage, scsi_mod and sd_mod
+modules.  Formatting and checking are done by the userspace tools
+mkfs.exfat and fsck.exfat (exfatprogs or exfat-utils) - the kernel does
+not provide them.
+
+Mount options
+-------------
+
+  uid=n, gid=n    Owner of all files and directories (default: the user
+                  who mounts).
+  umask=nnn       Octal mask applied to file and directory permissions
+                  (default: the umask of the mounting process).
+  fmask=nnn       Mask for files only.
+  dmask=nnn       Mask for directories only.
+  iocharset=name  Character set of file names as seen by Linux, using an
+                  NLS module (for example iso8859-1).  Default: utf8.
+                  Characters the charset cannot represent are shown as
+                  '?' and those names cannot be opened.
+  utf8            Same as iocharset=utf8.
+  quiet           chown/chmod requests that exFAT cannot store succeed
+                  silently instead of failing with EPERM.
+  ro, sync        Standard options; with "sync" every write waits for the
+                  device.
+
+Behaviour
+---------
+
+- Names are case-insensitive and case-preserving.  Trailing dots and
+  spaces are ignored, as on Windows.  The characters \ / : * ? " < > |
+  and control characters cannot be used.  Names are limited to 255
+  UTF-16 characters.
+- exFAT stores no owner or permissions.  The only thing chmod changes is
+  the read-only attribute: clearing the owner's write bit sets it.
+  The file modification time is stored with 2 second resolution.
+- Directories report a link count of 1, so "find" never assumes how many
+  subdirectories they have.
+- Writes reach the device through the buffer cache.  As with any Linux
+  filesystem, run sync or umount before unplugging a USB drive.
+
+Limitations
+-----------
+
+- Only devices with 512-byte sectors and volumes up to 2 TB.
+- At most 10 exFAT volumes can be mounted at the same time.
+- No symbolic links, hard links or device files (exFAT has none).
+- Removing a file that is still open, or renaming a file onto it, makes
+  further reads and writes through the open descriptor fail with ESTALE.
+  exFAT cannot keep a file whose name is gone.
+- Renaming onto an existing file first removes the target, so the rename
+  is not atomic.
+- Changing only the case of a name with rename does nothing.
+- Valid Data Length below the file size (preallocated files written by
+  some other systems) is not supported: such files are read as stored on
+  disk.

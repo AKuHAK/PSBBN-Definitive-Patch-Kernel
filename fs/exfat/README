@@ -1,0 +1,32 @@
+exFAT filesystem for Linux 2.4 (PlayStation 2)
+==============================================
+
+The on-disk format is handled by FatFs R0.16 by ChaN
+(https://elm-chan.org/fsw/ff/), with the upstream patches ff16p1 and
+ff16p2 (CVE-2026-6682, CVE-2026-6683, CVE-2026-6687) applied.  The Linux
+VFS glue is in super.c, namei.c, file.c and misc.c; see exfat_fs.h for
+the locking rules.
+
+FatFs files and local changes
+-----------------------------
+
+  ff.c, ff.h, ffunicode.c, diskio.h   FatFs R0.16 + patches 1 and 2
+  ffconf.h                            configuration for this driver
+
+The sources were converted from CRLF to LF line endings.  Local changes,
+all marked "Linux kernel port":
+
+  ff.h    The integer types may be predefined by ffconf.h (FF_INTDEF).
+          ff.h only picks them from <stdint.h> on C99 compilers, and
+          gcc 2.95 is a C89 compiler.
+  ff.c    Uses <linux/string.h> instead of <string.h> under __KERNEL__.
+  ff.c    Private __udivdi3() at the end of the file: f_lseek(),
+          clmt_clust() and sync_fs() divide 64-bit values and libgcc is
+          not linked into the kernel.
+
+When updating FatFs, reapply these three changes, keep FFCONF_DEF in
+ffconf.h in step with ff.h, and check with "nm -u exfat.o" that no
+libgcc helpers (__udivdi3, __umoddi3, ...) are needed.
+
+FatFs is distributed under a 1-clause BSD license (see the header of
+ff.c), which is compatible with the GPL.

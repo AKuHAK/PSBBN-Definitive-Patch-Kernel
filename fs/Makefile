@@ -37,6 +37,7 @@ subdir-$(CONFIG_FAT_FS)		+= fat
 subdir-$(CONFIG_UMSDOS_FS)	+= umsdos
 subdir-$(CONFIG_MSDOS_FS)	+= msdos
 subdir-$(CONFIG_VFAT_FS)	+= vfat
+subdir-$(CONFIG_EXFAT_FS)	+= exfat
 subdir-$(CONFIG_BFS_FS)		+= bfs
 subdir-$(CONFIG_ISO9660_FS)	+= isofs
 subdir-$(CONFIG_DEVFS_FS)	+= devfs
