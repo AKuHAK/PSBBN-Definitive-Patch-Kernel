@@ -9,10 +9,10 @@ Status
 
   - Builds with the PS2 toolchain (gcc 2.95.2) as a module, without
     warnings.  Every symbol it imports is exported by the kernel.
-  - NOT YET TESTED ON A REAL PS2.  The fileXio wire protocol was written
-    from the ps2sdk sources (ee/rpc/filexio, iop/fs/filexio) and the IOP
-    module loader from ps2sdk ee/kernel/src/loadfile.c, but no MMCE + PS2
-    Linux emulator exists, so the first run on hardware is the real test.
+  - DOES NOT WORK ON PSBBN YET (first hardware test, 2026-11-01, SD2PSX
+    in slot 1, PSBBN with this kernel).  The IOP modules cannot be loaded
+    from memory: see "Hardware findings" below.  The fileXio and mmceman
+    parts have therefore not run yet.
   - Target hardware: SD2PSX in a memory card slot, PSBBN Definitive Patch
     kernel.  The IOP modules cannot be preloaded in that setup, so mmcefs
     loads them itself.
@@ -54,6 +54,32 @@ Then, step by step (stop at the first failure and keep dmesg):
   6. After everything, check the SD card on a PC (chkdsk/fsck).
 
 Things to report back if it fails: full dmesg, the step, the exact error.
+
+Hardware findings (2026-11-01)
+------------------------------
+
+  - PSBBN's IOP has a LOADFILE server (the RPC binds) and it serves
+    function 0 (LF_F_MOD_LOAD, load from a path the IOP can open, e.g.
+    rom0:): "rom0:NOSUCH" gave -203, a ROM module loaded.
+  - It does not serve function 6 (LF_F_MOD_BUF_LOAD), which
+    ps2_load_module_buffer() uses: the reply never arrives in the receive
+    buffer, which keeps the IOP address we sent (so mmcefs logs the same
+    "IOP module 994816" = 0xF2E00 for every IRX) and fileXio never
+    starts ("fileXio RPC service not available (-19)").  This is not a
+    D-cache problem: invalidating the buffer after the reply changes
+    nothing.  ps2_load_module_buffer() should detect this (result ==
+    the address it sent) and fail with a clear message.
+  - So the IRX files must come from a path the IOP can read.  The memory
+    card would be the natural place, but on that console every file RPC
+    to the card failed at the SBIOS level (Open 145, GetDir 152, Mkdir:
+    "sbios_rpc: RPC failed ... result=-1", -SIF_RPCE_GETP) while GetInfo
+    worked, also right after a reboot.  Not investigated further.
+  - Other ways out: load the three modules before Linux starts (boot
+    loader / IOP reset image) and mount with noload; or find another IOP
+    device for the files.
+  - Do not test LF_F_MOD_LOAD with a ROM module that is already running
+    (e.g. rom0:SIO2MAN): it loads a second copy, and the console later
+    locked up and had to be power-cycled.
 
 Known risks (check these first)
 -------------------------------

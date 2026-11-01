@@ -58,4 +58,10 @@ utime.  Files may be larger than 4 GB.  Changes follow Sony's driver:
 
 Writing is still new: keep a backup of partitions that hold data you care
 about.  tests/ps2fs-qemu checks every change with ps2sdk's pfs (through
-pfsshell) and fsck, but not yet on a real PS2.
+pfsshell) and fsck.  On a PS2 running PSBBN, the same kinds of changes in
+a PP. partition read back identically through pfsshell, left fsck's
+findings unchanged, and removing them restored the zone bitmap exactly.
+
+Inodes whose own fields contradict each other (written by some older
+tools) cannot be read and give EIO, with "size beyond its zones" or
+"block counts do not match its zones" in the kernel log.
