@@ -26,6 +26,10 @@ static int init_flags;
 #include <asm/ps2/sysconf.h>
 extern int ps2_pccard_present;
 
+#include "sysvers.h"
+
+static const char *ver_ps1drv_rom, *ver_dvd_id, *ver_dvd_rom;
+
 
 
 static int proc_calc_metrics(char *page, char **start, off_t off,
@@ -57,13 +61,13 @@ int get_ps2sysvers(char *page, char **start, off_t off,
 		"DVDHDDVERSION=\"%s\"\n"
 		"DVDPATH=\"%s\"\n",
 		ps2_bootinfo->ver_model,
-		ps2_bootinfo->ver_ps1drv_rom,
+		ver_ps1drv_rom,
 		ps2_bootinfo->ver_ps1drv_hdd,
 		ps2_bootinfo->ver_ps1drv_path,
 		ps2_bootinfo->ver_vm,
 		ps2_bootinfo->ver_rb,
-		ps2_bootinfo->ver_dvd_id,
-		ps2_bootinfo->ver_dvd_rom,
+		ver_dvd_id,
+		ver_dvd_rom,
 		ps2_bootinfo->ver_dvd_hdd,
 		ps2_bootinfo->ver_dvd_path);
 	
@@ -104,6 +108,10 @@ int get_ps2sysconf(char *page, char **start, off_t off,
 
 int __init ps2sysproc_init(void)
 {
+	ver_ps1drv_rom = ps2_bootinfo->ver_ps1drv_rom;
+	ver_dvd_id = ps2_bootinfo->ver_dvd_id;
+	ver_dvd_rom = ps2_bootinfo->ver_dvd_rom;
+	ps2sysvers_fixup(&ver_ps1drv_rom, &ver_dvd_id, &ver_dvd_rom);
 
 #ifdef CONFIG_PROC_FS
 	create_proc_read_entry("ps2sysvers", 0, 0, get_ps2sysvers, NULL);
