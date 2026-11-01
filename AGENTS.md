@@ -84,10 +84,14 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
   - Driver-private data is stored in `hwif->hwif_data` (`struct ps2ide_dma_priv`).
   - Configures UDMA modes for disk transfers.
 
+### C2. CD/DVD (`drivers/ps2/cdvd.c`)
+- DVD-Video sectors need SBIOS call 196, which only the kernelloader TGE SBIOS has. It is used only with `ps2cdvd_dvdvideo=1` (boot or module parameter); PSBBN's Sony SBIOS lacks it.
+
 ### D. Partition Table Format (`fs/partitions/ps2.c`)
 - Reads the PlayStation 2 APA (Authentic Partition Architecture) partition table format used on PS2 HDDs.
 
 ### E. Additional Filesystems
+- `fs/ps2fs/`: APA/PFS driver (Andrew Church, ported by Mega Man). PSBBN keeps its own data on these partitions, so mounts are **read-only unless `-o unsafe_write`** is given (experimental file writes). Creating or removing directory entries is always refused (`PS2FS_DIR_WRITE` is 0) because it is known to destroy directory data.
 - `fs/exfat/`: exFAT driver built on FatFs R0.16 by ChaN plus Linux 2.4 VFS glue. Local FatFs changes are listed in `fs/exfat/README`.
 - `fs/mmcefs/`: Files on the SD card of an MMCE (SD2PSX, MemCard PRO2) through the IOP: a fileXio RPC client for `mmce0:`/`mmce1:`.
   - On first mount it loads `iomanX.irx`, `fileXio.irx` and `mmceman.irx` (shipped in `fs/mmcefs/irx/`) with `arch/mips/ps2/loadfile.c` (IOP LOADFILE RPC).
@@ -97,6 +101,11 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 ---
 
 ## 5. Guidelines for Future AI Agents
+
+0. **Testing**:
+   - `tests/exfat-qemu/run.sh` builds a vanilla 2.4.17 i386 kernel with `fs/exfat` and runs a test suite in QEMU, with `fsck.exfat` after each phase. Run it after any change to `fs/exfat`; CI runs it too.
+   - Code that talks to the IOP cannot be emulated; say so when it is untested on hardware.
+   - SIF RPC calls must retry on both `-SIF_RPCE_SENDP` (Sony SBIOS, used by PSBBN) and `-E_SIF_PKT_ALLOC` (kernelloader TGE).
 
 1. **PSBBN Compatibility**:
    - The primary goal of this repository is rock-solid stability with the latest PlayStation Broadband Navigator release.
