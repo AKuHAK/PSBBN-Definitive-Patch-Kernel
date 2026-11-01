@@ -219,8 +219,9 @@ static int mmcefs_load_irx_file(const char *name, char *path, int *modres)
 
 /*
  * Load an IOP module: from irx_dir through EE memory, or, once the IOP has
- * refused that (PSBBN's LOADFILE cannot load from memory), from irx_iop,
- * a directory the IOP reads itself (by default on the memory card).
+ * refused that (PSBBN's LOADFILE cannot load from memory) or irx_dir lacks
+ * the files, from irx_iop, a directory the IOP reads itself (by default on
+ * the memory card).
  */
 static int mmcefs_load_irx(const char *name)
 {
@@ -233,9 +234,11 @@ static int mmcefs_load_irx(const char *name)
 		return -ENAMETOOLONG;
 	if (!iop_only) {
 		rv = mmcefs_load_irx_file(name, path, &modres);
-		if (rv == -ENOSYS) {
-			printk(KERN_INFO "mmcefs: the IOP cannot load modules "
-			       "from memory; loading them from %s\n", irx_iop);
+		if (rv == -ENOSYS || rv == -ENOENT) {
+			printk(KERN_INFO "mmcefs: %s; loading modules from "
+			       "%s\n", rv == -ENOSYS ? "the IOP cannot load "
+			       "modules from memory" : "no IRX files in irx_dir",
+			       irx_iop);
 			iop_only = 1;
 		}
 	}
