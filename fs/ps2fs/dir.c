@@ -1,633 +1,639 @@
 /*
- * ps2fs/dir.c
+ * ps2fs/dir.c: directories
  *
  * Copyright (c) 2002 Andrew Church <achurch@achurch.org>
+ *
+ * A directory is a stream of 512-byte sectors, each tiled exactly by
+ * entries (see ps2fs_fs.h).  Directory blocks are metadata: they are read
+ * through the buffer cache and changed only inside a journal transaction.
+ * Insertion and removal follow Sony's driver (first fit, merge into the
+ * predecessor) so that PSBBN, fsck and Linux see the same layout.
  */
 
 #include <linux/config.h>
-#include <linux/version.h>
-#include <linux/string.h>
 #include <linux/fs.h>
-#include <linux/slab.h>
-#include <linux/init.h>
 #include <linux/locks.h>
-#include <linux/blkdev.h>
-#include <asm/uaccess.h>
+#include <linux/slab.h>
+#include <linux/string.h>
 
 #include "ps2fs_fs.h"
-#include "ps2fs_fs_sb.h"
-#include "ps2fs_fs_i.h"
 
 /*************************************************************************/
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,0)
-# define page buffer_head  /* "struct page" -> "struct buffer_head" */
-# define page_address(bh) ((bh)->b_data)
-# define PAGE_CACHE_SIZE 1024
-# define PAGE_CACHE_SHIFT 10
-# define PAGE_CACHE_MASK 0xFFFFFC00
-# define filldir(dirent,name,namelen,dirofs,inode,type) \
-    filldir(dirent,name,namelen,dirofs,inode)
-static ssize_t generic_read_dir(struct file *file, char *buf, size_t count,
-				loff_t *ppos) { return -EISDIR; }
-#endif
+/* Blocks one directory operation can put in a transaction, short of
+ * freeing zones (bitmap chunks are then committed as they fill) */
+#define OP_TBLOCKS	24
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-static struct dentry *ps2fs_lookup(struct inode *dir, struct dentry *dentry);
-#define LOOKUP_RETURN(x) return ERR_PTR(x)
-#else  /* < 2.4.0 */
-static int ps2fs_lookup(struct inode *dir, struct dentry *dentry);
-#define LOOKUP_RETURN(x) return (x)
-#endif
-static int ps2fs_readdir(struct file *file, void *dirent, filldir_t filldir);
-static int ps2fs_create(struct inode *dir, struct dentry *dentry, int mode);
-static int ps2fs_unlink(struct inode *dir, struct dentry *dentry);
-static int ps2fs_mkdir(struct inode *dir, struct dentry *dentry, int mode);
-static int ps2fs_rmdir(struct inode *dir, struct dentry *dentry);
+/* Position of an entry */
+struct dir_pos {
+    __u32 n;			/* sector index within the directory */
+    __u16 sub;			/* where that sector is */
+    __u32 sector;
+    int off;			/* entry offset within the sector */
+    int prev;			/* previous entry in the sector, or -1 */
+};
+
+#define DE(buf, off)	((struct ps2fs_dirent *)((char *)(buf) + (off)))
+#define ALEN(de)	(le16_to_cpu((de)->size_type) & PS2FS_DIRENT_SIZEMASK)
+
+static __u32 dir_size(struct inode *dir)
+{
+    return le32_to_cpu(PS2FS_I(dir)->raw.size_lo);
+}
+
+static void set_dir_size(struct inode *dir, __u32 size)
+{
+    PS2FS_I(dir)->raw.size_lo = cpu_to_le32(size);
+    dir->i_size = size;
+}
+
+/* Directory sector n -> (subpart, sector within it) */
+static int dir_sector(struct inode *dir, __u32 n, __u16 *sub, __u32 *sector)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(dir->i_sb);
+    __u32 zone;
+
+    if (ps2fs_map(dir, n >> sbi->sector_shift, sub, &zone)) {
+	ps2fs_error(dir->i_sb, "dir_sector", "directory 0x%08lX: size beyond "
+		    "its zones", dir->i_ino);
+	return -EIO;
+    }
+    *sector = (zone << sbi->sector_shift) + (n & ((1 << sbi->sector_shift) - 1));
+    return 0;
+}
+
+/* Check that the entry at `off' fits the sector tiling */
+static int entry_ok(struct inode *dir, const char *buf, int off)
+{
+    struct ps2fs_dirent *de = DE(buf, off);
+    int alen = ALEN(de);
+
+    if (alen % 4 || alen < PS2FS_DIRENT_USED(de->namelen)
+	|| off + alen > 512) {
+	ps2fs_error(dir->i_sb, "ps2fs_dir", "directory 0x%08lX: bad entry",
+		    dir->i_ino);
+	return 0;
+    }
+    return 1;
+}
+
+/* Copy directory sector n into buf (sbi->lock held) */
+static int read_dir_sector(struct inode *dir, __u32 n, char *buf,
+			   struct dir_pos *pos)
+{
+    struct buffer_head *bh;
+    int err;
+
+    if ((err = dir_sector(dir, n, &pos->sub, &pos->sector)))
+	return err;
+    bh = ps2fs_bread(dir->i_sb, pos->sub, pos->sector);
+    if (!bh)
+	return -EIO;
+    memcpy(buf, bh->b_data, 512);
+    brelse(bh);
+    pos->n = n;
+    return 0;
+}
+
+/* Sector of pos in the open transaction */
+static char *dir_tsector(struct inode *dir, struct dir_pos *pos, int noload)
+{
+    struct ps2fs_tblock *tb;
+
+    tb = ps2fs_tblock_get(dir->i_sb, pos->sub, pos->sector / 2, noload);
+    return tb ? tb->bh[pos->sector & 1]->b_data : NULL;
+}
+
+/*************************************************************************/
+
+/* Find `name' in dir.  Returns 1 and fills pos (and *de if given), 0 if
+ * not found, or <0.  sbi->lock held. */
+static int find_entry(struct inode *dir, const char *name, int len,
+		      struct dir_pos *pos, struct ps2fs_dirent *found)
+{
+    char *buf;
+    __u32 n, nsec = dir_size(dir) / 512;
+    int off, prev, err = 0;
+
+    buf = kmalloc(512, GFP_NOFS);
+    if (!buf)
+	return -ENOMEM;
+    for (n = 0; n < nsec && !err; n++) {
+	if ((err = read_dir_sector(dir, n, buf, pos)))
+	    break;
+	for (off = 0, prev = -1; off < 512; prev = off, off += ALEN(DE(buf, off))) {
+	    if (!entry_ok(dir, buf, off)) {
+		err = -EIO;
+		break;
+	    }
+	    if (DE(buf, off)->namelen == len
+		&& !memcmp(DE(buf, off)->name, name, len)) {
+		pos->off = off;
+		pos->prev = prev;
+		if (found)
+		    *found = *DE(buf, off);
+		err = 1;
+		break;
+	    }
+	}
+    }
+    kfree(buf);
+    return err;
+}
+
+/* Does dir hold anything but "." and ".."?  1 = empty, 0 = not, <0 */
+static int dir_empty(struct inode *dir)
+{
+    struct dir_pos pos;
+    struct ps2fs_dirent *de;
+    char *buf;
+    __u32 n, nsec = dir_size(dir) / 512;
+    int off, rv = 1;
+
+    buf = kmalloc(512, GFP_NOFS);
+    if (!buf)
+	return -ENOMEM;
+    for (n = 0; n < nsec && rv == 1; n++) {
+	if ((rv = read_dir_sector(dir, n, buf, &pos)))
+	    break;
+	rv = 1;
+	for (off = 0; off < 512; off += ALEN(de)) {
+	    de = DE(buf, off);
+	    if (!entry_ok(dir, buf, off)) {
+		rv = -EIO;
+		break;
+	    }
+	    if (de->namelen && !(de->namelen == 1 && de->name[0] == '.')
+		&& !(de->namelen == 2 && de->name[0] == '.'
+		     && de->name[1] == '.')) {
+		rv = 0;
+		break;
+	    }
+	}
+    }
+    kfree(buf);
+    return rv;
+}
+
+/* Insert an entry (first fit, else a new sector at the end) */
+static int add_entry(struct inode *dir, const char *name, int len,
+		     const struct ps2fs_blockinfo *target, __u16 type)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(dir->i_sb);
+    struct ps2fs_inode *raw = &PS2FS_I(dir)->raw;
+    struct ps2fs_dirent *de;
+    struct dir_pos pos;
+    char *buf, *p;
+    __u32 n, nsec = dir_size(dir) / 512, cap;
+    int need = PS2FS_DIRENT_USED(len), off, alen, used, tlen = 0, err = 0;
+
+    buf = kmalloc(512, GFP_NOFS);
+    if (!buf)
+	return -ENOMEM;
+    for (n = 0; n < nsec && !tlen && !err; n++) {
+	if ((err = read_dir_sector(dir, n, buf, &pos)))
+	    break;
+	for (off = 0; off < 512; off += alen) {
+	    if (!entry_ok(dir, buf, off)) {
+		err = -EIO;
+		break;
+	    }
+	    de = DE(buf, off);
+	    alen = ALEN(de);
+	    used = PS2FS_DIRENT_USED(de->namelen);
+	    if ((!de->namelen || !de->inode) && alen >= need) {
+		pos.off = off;			/* reuse an empty slot */
+		tlen = alen;
+		break;
+	    }
+	    if (de->namelen && alen - used >= need) {
+		if (!(p = dir_tsector(dir, &pos, 0))) {
+		    err = -EIO;
+		    break;
+		}
+		DE(p, off)->size_type = cpu_to_le16(
+		    (le16_to_cpu(de->size_type) & PS2FS_TYPE_MASK) | used);
+		pos.off = off + used;		/* split its slack */
+		tlen = alen - used;
+		break;
+	    }
+	}
+    }
+    kfree(buf);
+    if (err)
+	return err;
+
+    if (!tlen) {
+	/* append a sector, growing the directory by a zone if needed */
+	cap = (le32_to_cpu(raw->number_blocks)
+	       - le32_to_cpu(raw->number_segdesg)) * sbi->zone_size;
+	if (cap < dir_size(dir) + 512) {
+	    if ((err = ps2fs_grow(dir, 1)))
+		return err;
+	    dir->i_blocks = le32_to_cpu(raw->number_blocks) << sbi->sector_shift;
+	}
+	if ((err = dir_sector(dir, nsec, &pos.sub, &pos.sector)))
+	    return err;
+	pos.off = 0;
+	tlen = 512;
+	/* the other half of the block is beyond the size if the new
+	 * sector starts a block */
+	if (!(p = dir_tsector(dir, &pos, !(pos.sector & 1))))
+	    return -EIO;
+	set_dir_size(dir, dir_size(dir) + 512);
+    } else if (!(p = dir_tsector(dir, &pos, 0))) {
+	return -EIO;
+    }
+    de = DE(p, pos.off);
+    memset(de, 0, need);
+    de->inode = target->number;
+    de->subpart = le16_to_cpu(target->subpart);
+    de->namelen = len;
+    de->size_type = cpu_to_le16(type | tlen);
+    memcpy(de->name, name, len);
+    return 0;
+}
+
+/* Remove the entry at pos: merge it into its predecessor, or make it an
+ * empty slot (dropping the last sector once it is empty) */
+static int remove_entry(struct inode *dir, struct dir_pos *pos)
+{
+    struct ps2fs_dirent *de, *pde;
+    char *p;
+    int alen;
+
+    if (!(p = dir_tsector(dir, pos, 0)))
+	return -EIO;
+    de = DE(p, pos->off);
+    alen = ALEN(de);
+    if (pos->prev >= 0) {
+	pde = DE(p, pos->prev);
+	pde->size_type = cpu_to_le16(le16_to_cpu(pde->size_type) + alen);
+    } else {
+	de->inode = 0;
+	de->namelen = 0;
+	if (pos->n * 512 + alen >= dir_size(dir))
+	    set_dir_size(dir, pos->n * 512);
+    }
+    return 0;
+}
+
+/* Times of a changed directory; its inode joins the transaction */
+static int dir_touch(struct inode *dir)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(dir->i_sb);
+    struct ps2fs_inode *raw = &PS2FS_I(dir)->raw;
+
+    dir->i_atime = dir->i_ctime = dir->i_mtime = CURRENT_TIME;
+    to_ps2time(&raw->atime, dir->i_mtime, sbi->tzoffset);
+    raw->ctime = raw->mtime = raw->atime;
+    return ps2fs_write_raw(dir);
+}
+
+/*************************************************************************/
+
+/* Name on disk (UTF-8) of a dentry (EUC-JP); returns its length or <0 */
+static int disk_name(struct dentry *dentry, char *buf)
+{
+    int len;
+
+    if (!translate_to_unicode(dentry, buf, PS2FS_NAME_LEN + 1))
+	return -ENAMETOOLONG;
+    len = strlen(buf);
+    if (!len)
+	return -EINVAL;
+    return len;
+}
+
+/* Start a directory change: room in the journal, a usable volume */
+static int begin_op(struct super_block *sb)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+
+    if (!sbi->writable)
+	return -EROFS;
+    if (sbi->error)
+	return -EIO;
+    if (sbi->ntblocks + OP_TBLOCKS > sbi->max_tblocks)
+	return ps2fs_commit(sb);
+    return 0;
+}
+
+static struct dentry *ps2fs_lookup(struct inode *dir, struct dentry *dentry)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(dir->i_sb);
+    struct ps2fs_dirent de;
+    struct dir_pos pos;
+    struct inode *inode = NULL;
+    char name[PS2FS_NAME_LEN + 1];
+    int len, rv;
+
+    len = disk_name(dentry, name);
+    if (len == -ENAMETOOLONG)
+	return ERR_PTR(len);
+    if (len > 0) {
+	down(&sbi->lock);
+	rv = find_entry(dir, name, len, &pos, &de);
+	up(&sbi->lock);
+	if (rv < 0)
+	    return ERR_PTR(rv);
+	if (rv && de.inode) {
+	    inode = iget(dir->i_sb, PS2FS_MAKE_INUM(le32_to_cpu(de.inode),
+						    de.subpart));
+	    if (!inode)
+		return ERR_PTR(-EACCES);
+	    if (is_bad_inode(inode)) {
+		iput(inode);
+		return ERR_PTR(-EIO);
+	    }
+	}
+    }
+    d_add(dentry, inode);
+    return NULL;
+}
+
+static int ps2fs_readdir(struct file *filp, void *dirent, filldir_t filldir)
+{
+    struct inode *dir = filp->f_dentry->d_inode;
+    struct ps2fs_sb_info *sbi = PS2FS_SB(dir->i_sb);
+    struct ps2fs_dirent *de;
+    struct dir_pos pos;
+    char *buf, *name;
+    __u32 n;
+    int off, start, err = 0;
+    unsigned int type;
+
+    buf = kmalloc(512 + PS2FS_NAME_LEN + 1, GFP_KERNEL);
+    if (!buf)
+	return -ENOMEM;
+    name = buf + 512;
+    while (filp->f_pos < dir->i_size) {
+	n = filp->f_pos / 512;
+	start = filp->f_pos % 512;
+	/* copy the sector so that filldir runs without the lock */
+	down(&sbi->lock);
+	err = n < dir_size(dir) / 512 ? read_dir_sector(dir, n, buf, &pos) : 1;
+	up(&sbi->lock);
+	if (err)
+	    break;
+	for (off = 0; off < 512; off += ALEN(de)) {
+	    de = DE(buf, off);
+	    if (!entry_ok(dir, buf, off)) {
+		err = -EIO;
+		break;
+	    }
+	    if (off < start || !de->namelen)
+		continue;
+	    memcpy(name, de->name, de->namelen);
+	    name[de->namelen] = 0;
+	    translate_from_unicode(name);
+	    switch (le16_to_cpu(de->size_type) & PS2FS_TYPE_MASK) {
+	      case PS2FS_TYPE_DIR:	type = DT_DIR; break;
+	      case PS2FS_TYPE_SYMLINK:	type = DT_LNK; break;
+	      case PS2FS_TYPE_FILE:	type = DT_REG; break;
+	      default:			type = DT_UNKNOWN; break;
+	    }
+	    if (filldir(dirent, name, strlen(name), (loff_t)n * 512 + off,
+			PS2FS_MAKE_INUM(le32_to_cpu(de->inode), de->subpart),
+			type) < 0)
+		goto out;
+	    filp->f_pos = (loff_t)n * 512 + off + ALEN(de);
+	}
+	if (err)
+	    break;
+	filp->f_pos = (loff_t)(n + 1) * 512;
+    }
+  out:
+    kfree(buf);
+    return err < 0 ? err : 0;
+}
+
+/*************************************************************************/
+
+/* Create an inode of `type' and link it as dentry */
+static int make_node(struct inode *dir, struct dentry *dentry, int type,
+		     int perm, const char *symlink)
+{
+    struct super_block *sb = dir->i_sb;
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+    struct ps2fs_blockinfo e;
+    struct dir_pos pos;
+    struct inode *inode;
+    char name[PS2FS_NAME_LEN + 1];
+    int len, err, created = 0, linked = 0;
+
+    if ((len = disk_name(dentry, name)) < 0)
+	return len;
+    /* fsck takes any 2-byte name starting with '.' for ".." */
+    if (len == 2 && name[0] == '.')
+	return -EINVAL;
+    down(&sbi->lock);
+    if ((err = begin_op(sb)))
+	goto out;
+    err = find_entry(dir, name, len, &pos, NULL);
+    if (err) {
+	if (err > 0)
+	    err = -EEXIST;
+	goto out;
+    }
+    if ((err = ps2fs_new_inode(dir, type, perm, symlink, &e)))
+	goto out;
+    created = 1;
+    if (!(err = add_entry(dir, name, len, &e, type))) {
+	linked = 1;
+	err = dir_touch(dir);
+    }
+  out:
+    up(&sbi->lock);
+    if (!created)
+	return err;
+    inode = iget(sb, PS2FS_MAKE_INUM(le32_to_cpu(e.number),
+				     le16_to_cpu(e.subpart)));
+    if (!inode)
+	return err ? err : -EIO;
+    if (is_bad_inode(inode) || err) {
+	/* not linked: delete_inode frees what new_inode allocated */
+	if (!linked && !is_bad_inode(inode))
+	    inode->i_nlink = 0;
+	iput(inode);
+	return err ? err : -EIO;
+    }
+    d_instantiate(dentry, inode);
+    return 0;
+}
+
+static int ps2fs_create(struct inode *dir, struct dentry *dentry, int mode)
+{
+    return make_node(dir, dentry, PS2FS_TYPE_FILE, mode, NULL);
+}
+
+static int ps2fs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
+{
+    return make_node(dir, dentry, PS2FS_TYPE_DIR, mode, NULL);
+}
+
+static int ps2fs_symlink(struct inode *dir, struct dentry *dentry,
+			 const char *symname)
+{
+    if (strlen(symname) > PS2FS_SYMLINK_MAX)
+	return -ENAMETOOLONG;
+    return make_node(dir, dentry, PS2FS_TYPE_SYMLINK, 0777, symname);
+}
+
+/* Find dentry's entry and check that it names dentry's inode */
+static int find_own_entry(struct inode *dir, struct dentry *dentry,
+			  struct dir_pos *pos)
+{
+    struct ps2fs_dirent de;
+    char name[PS2FS_NAME_LEN + 1];
+    int len, rv;
+
+    if ((len = disk_name(dentry, name)) < 0)
+	return len;
+    rv = find_entry(dir, name, len, pos, &de);
+    if (rv < 0)
+	return rv;
+    if (!rv || PS2FS_MAKE_INUM(le32_to_cpu(de.inode), de.subpart)
+	!= dentry->d_inode->i_ino) {
+	ps2fs_error(dir->i_sb, "find_own_entry", "directory 0x%08lX changed "
+		    "under us", dir->i_ino);
+	return -EIO;
+    }
+    return 0;
+}
+
+/* Unlink or rmdir: the zones are freed by delete_inode at the last iput */
+static int remove_node(struct inode *dir, struct dentry *dentry, int isdir)
+{
+    struct super_block *sb = dir->i_sb;
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+    struct inode *inode = dentry->d_inode;
+    struct dir_pos pos;
+    int err;
+
+    down(&sbi->lock);
+    if ((err = begin_op(sb)))
+	goto out;
+    if (isdir && (err = dir_empty(inode)) <= 0) {
+	if (!err)
+	    err = -ENOTEMPTY;
+	goto out;
+    }
+    if ((err = find_own_entry(dir, dentry, &pos)))
+	goto out;
+    if ((err = remove_entry(dir, &pos)) || (err = dir_touch(dir)))
+	goto out;
+    inode->i_nlink = 0;
+    inode->i_ctime = dir->i_ctime;
+  out:
+    up(&sbi->lock);
+    return err;
+}
+
+static int ps2fs_unlink(struct inode *dir, struct dentry *dentry)
+{
+    return remove_node(dir, dentry, 0);
+}
+
+static int ps2fs_rmdir(struct inode *dir, struct dentry *dentry)
+{
+    return remove_node(dir, dentry, 1);
+}
+
+static int ps2fs_rename(struct inode *old_dir, struct dentry *old_dentry,
+			struct inode *new_dir, struct dentry *new_dentry)
+{
+    struct super_block *sb = old_dir->i_sb;
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+    struct inode *inode = old_dentry->d_inode;
+    struct inode *target = new_dentry->d_inode;
+    struct ps2fs_inode_info *ii = PS2FS_I(inode);
+    struct dir_pos pos;
+    char name[PS2FS_NAME_LEN + 1];
+    char *p;
+    __u16 type = le16_to_cpu(ii->raw.mode) & PS2FS_TYPE_MASK;
+    int len, err;
+
+    if ((len = disk_name(new_dentry, name)) < 0)
+	return len;
+    if (len == 2 && name[0] == '.')
+	return -EINVAL;
+    down(&sbi->lock);
+    if ((err = begin_op(sb)))
+	goto out;
+    /* the only allocation is growing new_dir; fail before changing
+     * anything if that could fail */
+    if (sbi->free_zones < 2) {
+	err = -ENOSPC;
+	goto out;
+    }
+    if (target) {
+	if (S_ISDIR(target->i_mode) && (err = dir_empty(target)) <= 0) {
+	    if (!err)
+		err = -ENOTEMPTY;
+	    goto out;
+	}
+	if ((err = find_own_entry(new_dir, new_dentry, &pos))
+	    || (err = remove_entry(new_dir, &pos)))
+	    goto out;
+    }
+    if ((err = find_own_entry(old_dir, old_dentry, &pos))
+	|| (err = remove_entry(old_dir, &pos))
+	|| (err = add_entry(new_dir, name, len, &ii->raw.inode_block, type)))
+	goto out;
+    if (S_ISDIR(inode->i_mode) && old_dir != new_dir) {
+	/* repoint "..", at byte 12 of the first sector */
+	if ((err = dir_sector(inode, 0, &pos.sub, &pos.sector)))
+	    goto out;
+	if (!(p = dir_tsector(inode, &pos, 0))) {
+	    err = -EIO;
+	    goto out;
+	}
+	DE(p, 12)->inode = PS2FS_I(new_dir)->raw.inode_block.number;
+	DE(p, 12)->subpart = le16_to_cpu(PS2FS_I(new_dir)->raw.inode_block.subpart);
+	if ((err = dir_touch(inode)))
+	    goto out;
+    }
+    if (old_dir != new_dir && (err = dir_touch(old_dir)))
+	goto out;
+    if ((err = dir_touch(new_dir)))
+	goto out;
+    if (target) {
+	target->i_nlink = 0;
+	target->i_ctime = new_dir->i_ctime;
+    }
+  out:
+    up(&sbi->lock);
+    return err;
+}
+
+static int ps2fs_dir_fsync(struct file *file, struct dentry *dentry,
+			   int datasync)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(dentry->d_inode->i_sb);
+    int err;
+
+    down(&sbi->lock);
+    err = ps2fs_commit(dentry->d_inode->i_sb);
+    up(&sbi->lock);
+    return err;
+}
+
+/*************************************************************************/
 
 struct file_operations ps2fs_dops = {
     read:	generic_read_dir,
     readdir:	ps2fs_readdir,
+    fsync:	ps2fs_dir_fsync,
 };
 
 struct inode_operations ps2fs_dir_iops = {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,0)
-    default_file_ops: &ps2fs_dops,
-    readpage:	generic_readpage,
-    bmap:	ps2fs_bmap,
-#endif
     lookup:	ps2fs_lookup,
     create:	ps2fs_create,
-    unlink:	ps2fs_unlink,
     mkdir:	ps2fs_mkdir,
+    symlink:	ps2fs_symlink,
+    unlink:	ps2fs_unlink,
     rmdir:	ps2fs_rmdir,
-/*    rename:	ps2fs_rename,*/
+    rename:	ps2fs_rename,
+    setattr:	ps2fs_setattr,
 };
-
-static int ps2fs_add_dirent(struct inode *dir, const char *name,
-			    struct inode *inode);
-static int ps2fs_remove_dirent(struct inode *dir, const char *name);
-static ino_t ps2fs_inode_by_name(struct inode *dir, struct dentry *dentry,
-				 int *mode);
-static ino_t ps2fs_check_dir_empty(struct inode *dir);
-
-static struct page *ps2fs_get_page(struct inode *dir, unsigned long pagenum);
-static void ps2fs_put_page(struct page *page);
-
-/*************************************************************************/
-/*************************************************************************/
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-static struct dentry *ps2fs_lookup(struct inode *dir, struct dentry *dentry)
-#else
-static int ps2fs_lookup(struct inode *dir, struct dentry *dentry)
-#endif
-{
-    struct inode *inode = NULL;
-    ino_t ino;
-    int mode;
-
-/* dprintk("lookup(%08lX,%.*s)\n",dir->i_ino,(int)dentry->d_name.len,dentry->d_name.name); */
-    if (dentry->d_name.len > PS2FS_NAME_LEN)
-	LOOKUP_RETURN(-ENAMETOOLONG);
-    ino = ps2fs_inode_by_name(dir, dentry, &mode);
-    if (ino) {
-	inode = iget(dir->i_sb, ino);
-/* dprintk("*** lookup got inode\n"); */
-	if (!inode)
-	    LOOKUP_RETURN(-EACCES);
-	if ((mode & PS2FS_DIRENT_IFMT) == PS2FS_DIRENT_IFDIR) {
-	    inode->i_mode &= ~S_IFMT;
-	    inode->i_mode |= S_IFDIR | S_IXUSR | S_IXGRP | S_IXOTH;
-	    inode->i_op = &ps2fs_dir_iops;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-	    inode->i_fop = &ps2fs_dops;
-#endif
-/* dprintk("*** lookup sets dir: newmode=%07o\n",(int)inode->i_mode); */
-	}
-    }
-    d_add(dentry, inode);
-    LOOKUP_RETURN(0);
-}
-
-/*************************************************************************/
-
-static int ps2fs_readdir(struct file *file, void *dirent, filldir_t filldir)
-{
-    struct inode *inode = file->f_dentry->d_inode;
-    loff_t pos = file->f_pos, size = inode->i_size;
-    unsigned int pageofs = pos & ~PAGE_CACHE_MASK;
-    unsigned long pagenum = pos >> PAGE_CACHE_SHIFT;
-    unsigned long npages = (size + (PAGE_CACHE_SIZE-1)) >> PAGE_CACHE_SHIFT;
-
-dprintk("readdir(%08lX) npages=%ld pos=%ld/%d\n",inode->i_ino,npages,pagenum,pageofs);
-    if (pos > size - sizeof(struct ps2fs_dirent))
-	return 0;
-
-    for (; pagenum < npages; pagenum++, pageofs = 0) {
-	struct page *page = ps2fs_get_page(inode, pagenum);
-	struct ps2fs_dirent *ps2de;
-	char *ptr, *end;
-
-	if (IS_ERR(page))
-	    continue;
-	ptr = page_address(page);
-	if (pagenum == npages-1 && (size&~PAGE_CACHE_MASK) != 0)
-	    end = ptr + (size&~PAGE_CACHE_MASK) - sizeof(struct ps2fs_dirent);
-	else
-	    end = ptr + PAGE_CACHE_SIZE - sizeof(struct ps2fs_dirent);
-	ps2de = (struct ps2fs_dirent *)(ptr + pageofs);
-	for (; (char *)ps2de <= end; ps2de = ps2fs_next_dirent(ps2de)) {
-	    char buf[PS2FS_NAME_LEN+1];
-	    pageofs = (char *)ps2de - ptr;
-	    if (!ps2de->inode || !ps2de->namelen)
-		continue;
-	    memcpy(buf, ps2de->name, ps2de->namelen);
-	    buf[ps2de->namelen] = 0;
-	    translate_from_unicode(buf);
-	    if (filldir(dirent, buf, strlen(buf),
-			pagenum<<PAGE_CACHE_SHIFT | pageofs,
-			le32_to_cpu(ps2de->inode), DT_UNKNOWN)) {
-		ps2fs_put_page(page);
-		goto stop;
-	    }
-	}
-	ps2fs_put_page(page);
-    }
-
-  stop:
-    file->f_pos = pagenum<<PAGE_CACHE_SHIFT | pageofs;
-    file->f_version = inode->i_version;
-    return 0;
-}
-
-/*************************************************************************/
-
-/* Create `dentry' in `dir' with mode `mode'. */
-
-static int ps2fs_create(struct inode *dir, struct dentry *dentry, int mode)
-{
-    char unicode_buf[PS2FS_DIRENT_NAMEMAX+1];
-    struct inode *inode;
-    int err;
-
-    if (!PS2FS_DIR_WRITE)
-	return -EROFS;
-    err = translate_to_unicode(dentry, unicode_buf, sizeof(unicode_buf));
-    if (err < 0)
-	return err;
-    inode = ps2fs_new_inode(dir->i_sb);
-    if (IS_ERR(inode))
-	return PTR_ERR(inode);
-    inode->i_op = &ps2fs_file_iops;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-    inode->i_fop = &ps2fs_fops;
-    inode->i_mapping->a_ops = &ps2fs_aops;
-#endif
-    err = ps2fs_add_dirent(dir, unicode_buf, inode);
-    if (err < 0) {
-dprintk("!!! freeing inode 0x%08lX from create failure\n", inode->i_ino);
-	kfree(PS2FS_INODE(inode)->rawinode);
-	free_block(inode->i_sb, inode->i_ino);
-	make_bad_inode(inode);
-	iput(inode);
-    } else {
-	d_instantiate(dentry, inode);
-    }
-    return err;
-}
-
-/*************************************************************************/
-
-/* Unlink `dentry' from `dir'. */
-
-static int ps2fs_unlink(struct inode *dir, struct dentry *dentry)
-{
-    char unicode_buf[PS2FS_DIRENT_NAMEMAX+1];
-    struct inode *inode = dentry->d_inode;
-    int err;
-
-    if (!PS2FS_DIR_WRITE)
-	return -EROFS;
-    err = translate_to_unicode(dentry, unicode_buf, sizeof(unicode_buf));
-    if (!err)
-	err = ps2fs_remove_dirent(dir, unicode_buf);
-    if (err < 0)
-	return err;
-    inode->i_nlink--;
-    return 0;
-}
-
-/*************************************************************************/
-
-/* Create directory `dentry' in `dir' with mode `mode'. */
-
-static int ps2fs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
-{
-    char unicode_buf[PS2FS_DIRENT_NAMEMAX+1];
-    struct inode *inode;
-    struct buffer_head tmpbh, *bh;
-    struct ps2fs_dirent *ps2de;
-    int err;
-
-    if (!PS2FS_DIR_WRITE)
-	return -EROFS;
-    /* Translate name to Unicode */
-    err = translate_to_unicode(dentry, unicode_buf, sizeof(unicode_buf));
-    if (err < 0)
-	return err;
-
-    /* Allocate new inode */
-    inode = ps2fs_new_inode(dir->i_sb);
-    if (IS_ERR(inode))
-	return PTR_ERR(inode);
-
-    /* Set up inode */
-    inode->i_mode &= ~S_IFREG;
-    inode->i_mode |= S_IFDIR | S_IXUSR | S_IXGRP | S_IXOTH;
-    inode->i_op = &ps2fs_dir_iops;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-    inode->i_fop = &ps2fs_dops;
-    inode->i_mapping->a_ops = &ps2fs_aops;
-#endif
-
-    /* Allocate first directory block */
-    if (ps2fs_get_block(inode, 0, &tmpbh, 1) < 0)
-	goto fail_inode;
-
-    /* Add . and .. entries to directory */
-    if (inode->i_sb->s_blocksize < 0x200) {
-	ps2fs_error(inode->i_sb, "ps2fs_mkdir", "internal error, bad blksize");
-	BUG();
-	goto fail_inode;
-    }
-    bh = bread(tmpbh.b_dev, tmpbh.b_blocknr, inode->i_sb->s_blocksize);
-    if (!bh)
-	goto fail_data;
-    inode->i_size = 0x200;
-    ps2de = (struct ps2fs_dirent *)((char *)bh->b_data);
-    ps2de->inode = cpu_to_le32(PS2FS_BNUM(inode->i_ino));
-    ps2de->subpart = PS2FS_SUBPART(inode->i_ino);
-    ps2de->namelen = 1;
-    ps2de->size_flags = cpu_to_le16(12 | PS2FS_DIRENT_IFDIR);
-    ps2de->name[0] = '.';
-    ps2de = (struct ps2fs_dirent *)((char *)bh->b_data+12);
-    ps2de->inode = cpu_to_le32(PS2FS_BNUM(inode->i_ino));
-    ps2de->subpart = PS2FS_SUBPART(inode->i_ino);
-    ps2de->namelen = 1;
-    ps2de->size_flags = cpu_to_le16(0x1E8 | PS2FS_DIRENT_IFDIR);
-    ps2de->name[0] = '.';
-    ps2de->name[1] = '.';
-    mark_buffer_dirty(bh);
-    brelse(bh);
-
-    /* Add entry for directory to parent directory */
-    err = ps2fs_add_dirent(dir, unicode_buf, inode);
-    if (err < 0)
-	goto fail_data;
-
-    /* Success */
-    d_instantiate(dentry, inode);
-    return err;
-
-  fail_data:
-    inode->i_size = 0;
-    ps2fs_truncate(inode);
-  fail_inode:
-dprintk("!!! freeing inode 0x%08lX from mkdir failure\n", inode->i_ino);
-    kfree(PS2FS_INODE(inode)->rawinode);
-    free_block(inode->i_sb, inode->i_ino);
-    make_bad_inode(inode);
-    iput(inode);
-    return err;
-}
-
-/*************************************************************************/
-
-/* Unlink `dentry' from `dir'.  The VFS layer guarantees that `dentry' is
- * a directory.
- */
-
-static int ps2fs_rmdir(struct inode *dir, struct dentry *dentry)
-{
-    char unicode_buf[PS2FS_DIRENT_NAMEMAX+1];
-    struct inode *inode = dentry->d_inode;
-    int err;
-
-    if (!PS2FS_DIR_WRITE)
-	return -EROFS;
-    err = translate_to_unicode(dentry, unicode_buf, sizeof(unicode_buf));
-    if (!err)
-	err = ps2fs_check_dir_empty(inode);
-    if (!err)
-	err = ps2fs_remove_dirent(dir, unicode_buf);
-    if (err < 0)
-	return err;
-    inode->i_nlink--;
-    return 0;
-}
-
-/*************************************************************************/
-/*************************************************************************/
-
-/* Directory entry lookup/modification utility routines.  There's a lot of
- * duplicated code here. */
-
-/*************************************************************************/
-
-/* Add `name' (already translated to Unicode) to `dir' pointing to `inode',
- * which must have i_mode set correctly w.r.t. regular file/directory.
- * Assumes the name does not already exist.  Returns 0 or error.
- */
-
-static int ps2fs_add_dirent(struct inode *dir, const char *name,
-			    struct inode *inode)
-{
-    unsigned long pagenum;
-    loff_t size = dir->i_size + 0x200;  /* because we may add a sector */
-    unsigned long npages = (size + (PAGE_CACHE_SIZE-1)) >> PAGE_CACHE_SHIFT;
-    int needed = sizeof(struct ps2fs_dirent) + ((strlen(name)+3)&~3);
-    int len = 0;
-    struct page *page = NULL;
-    struct ps2fs_dirent *ps2de;
-    char *ptr = NULL, *end;
-
-    if (strlen(name) > PS2FS_DIRENT_NAMEMAX)
-	return -ENAMETOOLONG;
-    for (pagenum = 0; pagenum < npages; pagenum++) {
-	page = ps2fs_get_page(dir, pagenum);
-	if (IS_ERR(page)) {
-	    if (pagenum == npages-1)
-		return -EIO;
-	    else
-		continue;
-	}
-	ptr = page_address(page);
-	if (pagenum == npages-1 && (size&~PAGE_CACHE_MASK) != 0)
-	    end = ptr + (size&~PAGE_CACHE_MASK) - sizeof(struct ps2fs_dirent);
-	else
-	    end = ptr + PAGE_CACHE_SIZE - sizeof(struct ps2fs_dirent);
-	if (pagenum == npages-1)
-	    end -= 0x200;
-	ps2de = (struct ps2fs_dirent *)ptr;
-	len = 0x200;
-	for (; (char *)ps2de <= end; ps2de = ps2fs_next_dirent(ps2de)) {
-	    if (!ps2de->inode || !ps2de->namelen)
-		continue;
-	    len = sizeof(struct ps2fs_dirent) + ((ps2de->namelen+3)&~3);
-	    if ((ps2de->size_flags & PS2FS_DIRENT_SIZEMASK) - len >= needed) {
-		ptr += len;
-		len = (ps2de->size_flags & PS2FS_DIRENT_SIZEMASK) - len;
-		goto found;
-	    }
-	}
-	if (pagenum != npages-1)
-	    ps2fs_put_page(page);
-	/* else fall through */
-    }
-  found:
-    ps2de = (struct ps2fs_dirent *)ptr;
-    ps2de->inode = cpu_to_le32(PS2FS_BNUM(inode->i_ino));
-    ps2de->subpart = PS2FS_SUBPART(inode->i_ino);
-    ps2de->namelen = strlen(name);
-    ps2de->size_flags = len;
-    strcpy(ps2de->name, name);  /* safe because we checked length at top */
-    if (S_ISDIR(inode->i_mode))
-	ps2de->size_flags |= PS2FS_DIRENT_IFDIR;
-    else if (S_ISREG(inode->i_mode))
-	ps2de->size_flags |= PS2FS_DIRENT_IFREG;
-    else {
-	ps2fs_error(dir->i_sb, "ps2fs_add_dirent",
-		    "improper mode 0%o for target inode", inode->i_mode);
-	BUG();
-	return -EINVAL;
-    }
-    ps2fs_put_page(page);
-    return 0;
-}
-
-/*************************************************************************/
-
-/* Remove `name' (already translated to Unicode) from `dir'.  Will not
- * remove "." or "..".  Returns 0 or error.
- */
-
-static int ps2fs_remove_dirent(struct inode *dir, const char *name)
-{
-    int namelen = strlen(name);
-    unsigned long pagenum;
-    loff_t size = dir->i_size;
-    unsigned long npages = (size + (PAGE_CACHE_SIZE-1)) >> PAGE_CACHE_SHIFT;
-    struct page *page;
-    struct ps2fs_dirent *ps2de, *last;
-    char *ptr, *end;
-
-    if (*name == '.' && (!name[1] || (name[1] == '.' && !name[2]))) {
-	/* Refuse "." and ".." */
-	return -EPERM;
-    }
-    if (strlen(name) > PS2FS_DIRENT_NAMEMAX)
-	return -ENAMETOOLONG;
-    for (pagenum = 0; pagenum < npages; pagenum++) {
-	page = ps2fs_get_page(dir, pagenum);
-	if (IS_ERR(page))
-	    continue;
-	ptr = page_address(page);
-	if (pagenum == npages-1 && (size&~PAGE_CACHE_MASK) != 0)
-	    end = ptr + (size&~PAGE_CACHE_MASK) - sizeof(struct ps2fs_dirent);
-	else
-	    end = ptr + PAGE_CACHE_SIZE - sizeof(struct ps2fs_dirent);
-	ps2de = (struct ps2fs_dirent *)ptr;
-	last = ps2de;
-	for (; (char *)ps2de <= end;
-	       last = ps2de, ps2de = ps2fs_next_dirent(ps2de)
-	) {
-	    if (!ps2de->inode)
-		break;
-	    if ((((char *)ps2de - ptr) & 0x1FF) == 0) /*first entry in sector*/
-		last = ps2de;
-	    if (ps2de->namelen == namelen
-	     && memcmp(ps2de->name, name, namelen) == 0
-	    ) {
-		if (ps2de == last) {  /* first entry in the sector */
-		    ps2de->inode = 0;
-		    ps2de->namelen = 0;
-		} else {
-		    int size = le16_to_cpu(ps2de->size_flags)
-			       & PS2FS_DIRENT_SIZEMASK;
-		    size += le16_to_cpu(last->size_flags);
-		    last->size_flags = cpu_to_le16(size);
-		}
-		ps2fs_put_page(page);
-		return 0;
-	    }
-	}
-	ps2fs_put_page(page);
-    }
-    /* Not found */
-    return -ENOENT;
-}
-
-/*************************************************************************/
-
-/* Return the inode for `dentry' in `dir', or 0 if no such name exists.
- * If successful, the 16-bit mode value from the directory entry is stored
- * in `*mode' if `mode' is non-NULL.
- */
-
-static ino_t ps2fs_inode_by_name(struct inode *dir, struct dentry *dentry,
-				 int *mode)
-{
-    unsigned long pagenum;
-    loff_t size = dir->i_size;
-    unsigned long npages = (size + (PAGE_CACHE_SIZE-1)) >> PAGE_CACHE_SHIFT;
-
-    for (pagenum = 0; pagenum < npages; pagenum++) {
-	struct page *page = ps2fs_get_page(dir, pagenum);
-	struct ps2fs_dirent *ps2de;
-	char *ptr, *end;
-
-	if (IS_ERR(page))
-	    continue;
-	ptr = page_address(page);
-	if (pagenum == npages-1 && (size&~PAGE_CACHE_MASK) != 0)
-	    end = ptr + (size&~PAGE_CACHE_MASK) - sizeof(struct ps2fs_dirent);
-	else
-	    end = ptr + PAGE_CACHE_SIZE - sizeof(struct ps2fs_dirent);
-	ps2de = (struct ps2fs_dirent *)ptr;
-	for (; (char *)ps2de <= end; ps2de = ps2fs_next_dirent(ps2de)) {
-	    char buf[PS2FS_NAME_LEN+1];
-	    if (!ps2de->inode || !ps2de->namelen)
-		continue;
-	    memcpy(buf, ps2de->name, ps2de->namelen);
-	    buf[ps2de->namelen] = 0;
-	    translate_from_unicode(buf);
-	    if (buf[dentry->d_name.len] == 0
-	     && memcmp(buf, dentry->d_name.name, dentry->d_name.len) == 0
-	    ) {
-		ps2fs_put_page(page);
-		if (mode)
-		    *mode = le16_to_cpu(ps2de->size_flags);
-		return PS2FS_MAKE_INUM(le32_to_cpu(ps2de->inode),
-				       ps2de->subpart);
-	    }
-	}
-	ps2fs_put_page(page);
-    }
-    return 0;
-}
-
-/*************************************************************************/
-
-/* Check whether `dir' is empty.  Returns 0 if so, -ENOTEMPTY if not.
- * Assumes `dir' is a directory.
- */
-
-static ino_t ps2fs_check_dir_empty(struct inode *dir)
-{
-    unsigned long pagenum;
-    loff_t size = dir->i_size;
-    unsigned long npages = (size + (PAGE_CACHE_SIZE-1)) >> PAGE_CACHE_SHIFT;
-
-    for (pagenum = 0; pagenum < npages; pagenum++) {
-	struct page *page = ps2fs_get_page(dir, pagenum);
-	struct ps2fs_dirent *ps2de;
-	char *ptr, *end;
-
-	if (IS_ERR(page))
-	    continue;
-	ptr = page_address(page);
-	if (pagenum == npages-1 && (size&~PAGE_CACHE_MASK) != 0)
-	    end = ptr + (size&~PAGE_CACHE_MASK) - sizeof(struct ps2fs_dirent);
-	else
-	    end = ptr + PAGE_CACHE_SIZE - sizeof(struct ps2fs_dirent);
-	ps2de = (struct ps2fs_dirent *)ptr;
-	for (; (char *)ps2de <= end; ps2de = ps2fs_next_dirent(ps2de)) {
-	    if (!(ps2de->namelen==1 && ps2de->name[0]=='.')
-	     && !(ps2de->namelen==2 && ps2de->name[0]=='.' && ps2de->name[1]=='.')
-	    ) {
-		ps2fs_put_page(page);
-		return -ENOTEMPTY;
-	    }
-	}
-	ps2fs_put_page(page);
-    }
-    return 0;
-}
-
-/*************************************************************************/
-/*************************************************************************/
-
-/* Version-specific utility and callback routines */
-
-/*************************************************************************/
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-
-static int ps2fs_check_page(struct page *page);
-
-/* Read in and return a page of a directory. */
-static struct page *ps2fs_get_page(struct inode *dir, unsigned long pagenum)
-{
-    struct address_space *mapping = dir->i_mapping;
-    struct page *page;
-
-    page = read_cache_page(mapping, pagenum,
-			   (filler_t *)mapping->a_ops->readpage, NULL);
-    if (!IS_ERR(page)) {
-	wait_on_page(page);
-	kmap(page);
-	if (!Page_Uptodate(page)
-	 || PageError(page)
-	 || (!PageChecked(page) && !ps2fs_check_page(page))
-	) {
-	    ps2fs_put_page(page);
-	    return ERR_PTR(-EIO);
-	}
-    }
-    return page;
-}
-
-static int ps2fs_check_page(struct page *page)
-{
-    SetPageChecked(page);
-    return 1;
-}
-
-static void ps2fs_put_page(struct page *page)
-{
-    kunmap(page);
-    page_cache_release(page);
-}
-
-#else  /* kernel version < 2.4.0 */
-
-static struct buffer_head *ps2fs_get_page(struct inode *dir,
-					  unsigned long pagenum)
-{
-    struct buffer_head *bh;
-    struct buffer_head tmpbh;  /* to receive block numbers */
-    int err;
-
-    if (dir->i_sb->s_blocksize != PAGE_CACHE_SIZE) {
-	ps2fs_error(dir->i_sb, "ps2fs_get_page", "bad blocksize (%d)",
-		    dir->i_sb->s_blocksize);
-	return ERR_PTR(-EIO);
-    }
-    err = ps2fs_get_block(dir, pagenum, &tmpbh, 1);
-    if (err)
-	return ERR_PTR(err);
-    bh = bread(tmpbh.b_dev, tmpbh.b_blocknr, PAGE_CACHE_SIZE);
-    if (!bh)
-	return ERR_PTR(-EIO);
-    return bh;
-}
-
-static void ps2fs_put_page(struct buffer_head *bh)
-{
-    brelse(bh);
-}
-
-#endif  /* kernel version */
-
-/*************************************************************************/

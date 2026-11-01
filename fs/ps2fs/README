@@ -1,3 +1,6 @@
+Note (2026): this driver now writes files and directories; see
+Documentation/filesystems/ps2fs.txt.  The text below describes 0.9.
+
 ＰＳ２ブラウザ用ＦＳモジュール (version 0.9)
 ------------------------------
 Copyright (c) 2002 Andrew Church <achurch@achurch.org>

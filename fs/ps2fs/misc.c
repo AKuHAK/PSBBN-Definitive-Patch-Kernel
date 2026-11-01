@@ -10,6 +10,7 @@
 #include <linux/string.h>
 #include <linux/fs.h>
 #include <linux/blkdev.h>
+#include <linux/time.h>
 
 #include "ps2fs_fs.h"
 
@@ -52,76 +53,46 @@ void ps2fs_error(struct super_block *sb, const char *function,
 
 /*************************************************************************/
 
-/* Report a fatal error on the given filesystem and halt. */
+/* Times on disk are local time of the console clock, which by PS2
+ * convention runs on Japan Standard Time; tzoffset is in seconds east of
+ * UTC. */
 
-void ps2fs_panic(struct super_block *sb, const char *function,
-		 const char *fmt, ...)
+time_t from_ps2time(const struct ps2fs_datetime *dt, __s32 tzoffset)
 {
-    va_list args;
+    unsigned int year = le16_to_cpu(dt->year);
 
-    va_start(args, fmt);
-    vsprintf(error_buf, fmt, args);
-    va_end(args);
-    panic("ps2fs PANIC (device %s): %s: %s\n",
-	  bdevname(sb->s_dev), function, error_buf);
-}
-
-/*************************************************************************/
-/*************************************************************************/
-
-static int mdays[12] = {0,31,59,90,120,151,181,212,243,273,304,334};
-
-/*************************************************************************/
-
-/* Convert a ps2fs_datetime structure to an ordinary time value. */
-
-__s32 from_ps2time(const struct ps2fs_datetime *dt)
-{
-    __s32 t = 0;
-    __u16 year = le16_to_cpu(dt->year);
-    int i;
-
-    for (i = 1970; i < year; i++) {
-	t += 365*86400;
-	if (i%4 == 0 && (t%100 != 0 || t%400 == 0))
-	    t += 86400;
-    }
-    t += mdays[dt->month-1] * 86400;
-    if (dt->month > 2 && (year%4 == 0 && (year%100 != 0 || year%400 == 0)))
-	t += 86400;
-    return t + (dt->day-1)*86400 + dt->hour*3600 + dt->min*60 + dt->sec;
+    if (year < 1970 || year > 2105 || dt->month < 1 || dt->month > 12
+	|| dt->day < 1 || dt->day > 31)
+	return 0;
+    return mktime(year, dt->month, dt->day, dt->hour, dt->min, dt->sec)
+	- tzoffset;
 }
 
 /*************************************************************************/
 
-/* Convert an ordinary time value to a ps2fs_datetime structure. */
-
-void to_ps2time(struct ps2fs_datetime *dt, __s32 time)
+void to_ps2time(struct ps2fs_datetime *dt, time_t time, __s32 tzoffset)
 {
-    __u16 year;
-    int days, i;
+    unsigned long t, days, era, doe, yoe, doy, mp, year, month;
 
-    year = 1969;
-    do {
-	year++;
-	if (year%4 == 0 && (year%100 != 0 || year%400 == 0))
-	    days = 366;
-	else
-	    days = 365;
-	time -= days*86400;
-    } while (time >= 0);
-    time += days*86400;
+    t = time + tzoffset > 0 ? time + tzoffset : 0;
+    days = t / 86400;
+    t %= 86400;
+    /* civil date from day number (days since 0000-03-01 shifted) */
+    days += 719468;
+    era = days / 146097;
+    doe = days - era * 146097;
+    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    mp = (5 * doy + 2) / 153;
+    month = mp < 10 ? mp + 3 : mp - 9;
+    year = yoe + era * 400 + (month <= 2);
+    dt->unused = 0;
+    dt->sec = t % 60;
+    dt->min = t / 60 % 60;
+    dt->hour = t / 3600;
+    dt->day = doy - (153 * mp + 2) / 5 + 1;
+    dt->month = month;
     dt->year = cpu_to_le16(year);
-    for (i = 1; i < 12; i++) {
-	if (time < mdays[i]*86400)
-	    break;
-    }
-    dt->month = i;
-    time -= mdays[i-1]*86400;
-    dt->day = time/86400 + 1;
-    dt->hour = time%86400 / 3600;
-    dt->min = time%3600 / 60;
-    dt->sec = time%60;
 }
 
 /*************************************************************************/

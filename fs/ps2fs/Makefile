@@ -9,7 +9,8 @@
 
 O_TARGET := ps2fs.o
 
-obj-y    := dir.o inode.o misc.o partition.o super.o unicode.o bitmap.o
+obj-y    := bitmap.o dir.o inode.o journal.o misc.o partition.o segment.o \
+	    super.o unicode.o
 obj-m    := $(O_TARGET)
 
 include $(TOPDIR)/Rules.make

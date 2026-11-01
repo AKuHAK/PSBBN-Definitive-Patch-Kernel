@@ -10,279 +10,332 @@
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/blkdev.h>
+#include <linux/locks.h>
+#include <linux/slab.h>
 #include <asm/uaccess.h>
 
 #include "ps2fs_fs.h"
-#include "ps2fs_fs_sb.h"
 #include "ps2_partition.h"
 
 /*************************************************************************/
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,0)
-#define strspn my_strspn
-static int strspn(const char *s, const char *accept)
-{
-    int count = 0;
-    while (strchr(accept, *s++))
-	count++;
-    return count;
-}
-#endif
-
-/*************************************************************************/
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
+static void ps2fs_put_super(struct super_block *sb);
+static void ps2fs_write_super(struct super_block *sb);
 static int ps2fs_statfs(struct super_block *sb, struct statfs *sf);
-#else
-static int ps2fs_statfs(struct super_block *sb, struct statfs *sf, int bufsiz);
-#endif
 static int ps2fs_remount_fs(struct super_block *sb, int *flags, char *data);
 
 static struct super_operations ps2fs_sops = {
     read_inode:		ps2fs_read_inode,
     write_inode:	ps2fs_write_inode,
-    put_inode:		ps2fs_put_inode,
     delete_inode:	ps2fs_delete_inode,
+    clear_inode:	ps2fs_clear_inode,
+    put_super:		ps2fs_put_super,
+    write_super:	ps2fs_write_super,
     statfs:		ps2fs_statfs,
     remount_fs:		ps2fs_remount_fs,
+};
+
+struct ps2fs_options {
+    char partition[PS2_PART_IDMAX+2];
+    int tzoffset;			/* minutes */
+    int unsafe_write;
+    uid_t uid;
+    gid_t gid;
 };
 
 /*************************************************************************/
 /*************************************************************************/
 
-/* Parse options into variables; return 1 on success, or 0 if an
- * unsupported option is found.
- */
+/* Parse options into `opt'; return 1 on success, or 0 if an unsupported
+ * option is found. */
 
-static int parse_options(char *options, char opt_partition[PS2_PART_IDMAX+2],
-			 int *opt_tzoffset, int *opt_unsafe_write)
+static int parse_options(char *options, struct ps2fs_options *opt)
 {
-    char *s;
+    char *s, *value;
 
     while (options && *options) {
-	if (strncmp(options, "partition=", 10) == 0) {
-	    options += 10;
-	    if (!*options || *options == ',') {
-		printk("ps2fs: partition ID missing\n");
-		return 0;
-	    }
-	    s = strpbrk(options, ",");
-	    if (s)
-		*s++ = 0;
-	    else
-		s = options + strlen(options);
-	    strncpy(opt_partition, options, PS2_PART_IDMAX+1);
-	    opt_partition[PS2_PART_IDMAX+1] = 0;
-	    if (strlen(opt_partition) > PS2_PART_IDMAX) {
-		printk("ps2fs: partition ID too long (%d chars max)",
+	s = strchr(options, ',');
+	if (s)
+	    *s++ = 0;
+	value = strchr(options, '=');
+	if (value)
+	    *value++ = 0;
+	if (strcmp(options, "partition") == 0 && value && *value) {
+	    if (strlen(value) > PS2_PART_IDMAX) {
+		printk("ps2fs: partition ID too long (%d chars max)\n",
 		       PS2_PART_IDMAX);
 		return 0;
 	    }
-	    options = s;
-	} else if (strncmp(options, "tzoffset=", 9) == 0) {
-	    options += 9;
-	    if (!*options || *options == ',') {
-		printk("ps2fs: time zone offset missing\n");
-		return 0;
-	    }
-	    *opt_tzoffset = simple_strtol(options, &options, 0);
-	    if (*options && *options != ',') {
+	    strcpy(opt->partition, value);
+	} else if (strcmp(options, "tzoffset") == 0 && value && *value) {
+	    opt->tzoffset = simple_strtol(value, &value, 0);
+	    if (*value) {
 		printk("ps2fs: tzoffset option requires an integer\n");
 		return 0;
 	    }
-	} else if (strncmp(options, "unsafe_write", 12) == 0 &&
-		   (!options[12] || options[12] == ',')) {
-	    options += 12;
-	    *opt_unsafe_write = 1;
+	} else if (strcmp(options, "uid") == 0 && value && *value) {
+	    opt->uid = simple_strtoul(value, &value, 0);
+	    if (*value)
+		return 0;
+	} else if (strcmp(options, "gid") == 0 && value && *value) {
+	    opt->gid = simple_strtoul(value, &value, 0);
+	    if (*value)
+		return 0;
+	} else if (strcmp(options, "unsafe_write") == 0 && !value) {
+	    opt->unsafe_write = 1;
 	} else {
-	    s = strpbrk(options, "=");
-	    if (s)
-		*s = 0;
 	    printk("ps2fs: unrecognized option `%s'\n", options);
 	    return 0;
 	}
-	/* PS2 Linux (beta) chokes on the next line if *options == 0.
-	 * This is believed to be due to a compiler bug:
-         * strspn("\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x91", ",") returns 14,
-	 * not 0 as it should.  So make an explicit check for end-of-
-	 * string. */
-	if (*options)
-	    options += strspn(options, ",");
+	options = s;
     }
     return 1;
 }
 
 /*************************************************************************/
 
-/* Read the superblock of a to-be-mounted filesystem.  Returns the
- * superblock structure passed in on success, NULL on failure.
- */
+/* Read and check the PFS superblock; fills the geometry of sbi */
+static int read_pfs_super(struct super_block *sb, int silent, __u32 *fsck_stat)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+    struct buffer_head *bh;
+    struct ps2fs_super_block *psb;
+    __u32 zsize, nsubs, i;
+    int err = -EINVAL;
+
+    bh = bread(sb->s_dev, sbi->part_start[0] + PS2FS_SUPER_SECTOR, 512);
+    if (!bh) {
+	printk("ps2fs: unable to read superblock\n");
+	return -EIO;
+    }
+    psb = (struct ps2fs_super_block *)bh->b_data;
+    zsize = le32_to_cpu(psb->zone_size);
+    nsubs = le32_to_cpu(psb->num_subs);
+    if (le32_to_cpu(psb->magic) != PS2FS_SUPER_MAGIC) {
+	if (!silent)
+	    printk("ps2fs: bad magic number in superblock\n");
+	goto out;
+    }
+    if (le32_to_cpu(psb->version) > PS2FS_FORMAT_VERSION) {
+	printk("ps2fs: unknown format version %u\n",
+	       le32_to_cpu(psb->version));
+	goto out;
+    }
+    if (zsize < 2048 || zsize > 131072 || (zsize & (zsize - 1))) {
+	printk("ps2fs: bad zone size %u\n", zsize);
+	goto out;
+    }
+    if (nsubs + 1 > sbi->n_subparts) {
+	printk("ps2fs: superblock claims %u sub-partitions, APA has %u\n",
+	       nsubs, sbi->n_subparts - 1);
+	goto out;
+    }
+    sbi->n_subparts = nsubs + 1;
+    sbi->zone_size = zsize;
+    for (i = 0; zsize > 512; i++)
+	zsize >>= 1;
+    sbi->sector_shift = i;
+    sbi->block_shift = i - 1;
+    sbi->log.number = le32_to_cpu(psb->log.number);
+    sbi->log.subpart = le16_to_cpu(psb->log.subpart);
+    sbi->log.count = le16_to_cpu(psb->log.count);
+    sbi->root.number = le32_to_cpu(psb->root.number);
+    sbi->root.subpart = le16_to_cpu(psb->root.subpart);
+    sbi->root.count = le16_to_cpu(psb->root.count);
+    if (sbi->log.subpart != 0 || sbi->log.count < 1
+	|| ((sbi->log.number + sbi->log.count) << sbi->sector_shift)
+	   > sbi->part_size[0]
+	|| sbi->root.subpart >= sbi->n_subparts) {
+	printk("ps2fs: bad journal or root location in superblock\n");
+	goto out;
+    }
+    *fsck_stat = le32_to_cpu(psb->fsck_stat);
+    err = 0;
+  out:
+    brelse(bh);
+    return err;
+}
+
+/* Make the mount writable: refuse flagged volumes, replay the journal */
+static int start_writing(struct super_block *sb, __u32 fsck_stat)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+    int err;
+
+    if (fsck_stat & PS2FS_FSCK_WRITE_ERROR) {
+	printk(KERN_WARNING "ps2fs: volume is flagged with a write error; "
+	       "check it on the PS2 (or with pfsshell) before writing\n");
+	return -EROFS;
+    }
+    down(&sbi->lock);
+    sbi->writable = 1;
+    sbi->error = 0;
+    err = ps2fs_journal_replay(sb);
+    if (!err)
+	err = ps2fs_count_free(sb);
+    if (err)
+	sbi->writable = 0;
+    up(&sbi->lock);
+    if (!err) {
+	sb->s_flags |= MS_NOATIME | MS_NODIRATIME;
+	printk(KERN_WARNING "ps2fs: unsafe_write: writing is experimental; "
+	       "keep a backup of this partition\n");
+    }
+    return err;
+}
 
 struct super_block *ps2fs_read_super(struct super_block *sb, void *data,
 				     int silent)
 {
-    kdev_t dev = sb->s_dev;
-    int blocksize;
-    struct buffer_head *bh;
-    struct ps2fs_super_block *ps2sb;
-    struct ps2fs_sb_info *sbinfo = PS2FS_SB(sb);
-    char opt_partition[PS2_PART_IDMAX+2] = "";
-    int opt_tzoffset = 0;
-    int opt_unsafe_write = 0;
-    int i;
-    char *s;
+    struct ps2fs_sb_info *sbi;
+    struct ps2fs_options opt;
+    struct inode *root;
+    __u32 fsck_stat = 0;
+    int n;
 
-    /* Parse options */
-    if (!parse_options((char *)data, opt_partition, &opt_tzoffset,
-		       &opt_unsafe_write))
+    memset(&opt, 0, sizeof(opt));
+    opt.tzoffset = 540;		/* the PS2 clock runs on JST */
+    if (!parse_options((char *)data, &opt))
 	return NULL;
 
-    /* Get the hardware block size */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-    blocksize = get_hardsect_size(dev);
-#else
-    blocksize = get_hardblocksize(dev);
-    if (blocksize < BLOCK_SIZE)
-	blocksize = BLOCK_SIZE;
-#endif
-
-    /* Locate the partition given by the "partition=" option, if any */
-    if (*opt_partition)
-	s = opt_partition;
-    else
-	s = NULL;
-    i = find_partition(dev, blocksize, s, sbinfo->first_sector, sbinfo->size);
-    if (i < 0)
+    sbi = kmalloc(sizeof(*sbi), GFP_KERNEL);
+    if (!sbi)
 	return NULL;
-    sbinfo->n_subparts = i;
+    memset(sbi, 0, sizeof(*sbi));
+    init_MUTEX(&sbi->lock);
+    sbi->tzoffset = opt.tzoffset * 60;
+    sbi->uid = opt.uid;
+    sbi->gid = opt.gid;
+    sbi->unsafe_write = opt.unsafe_write;
+    sb->u.generic_sbp = sbi;
 
-    /* Read the super block from address 0x400000 in the first subpart */
-    bh = bread(dev, sbinfo->first_sector[0] + (0x400000/blocksize), blocksize);
-    if (!bh) {
-	printk("ps2fs: unable to read superblock\n");
-	return NULL;
-    }
-    ps2sb = (struct ps2fs_super_block *)(bh->b_data);
-
-    /* Check the magic value and save other values */
-    if (le32_to_cpu(ps2sb->magic) != PS2FS_SUPER_MAGIC) {
-	printk("ps2fs: bad magic number in superblock\n");
-	brelse(bh);
-	return NULL;
-    }
-    i = le32_to_cpu(ps2sb->blocksize) / blocksize;
-    sbinfo->block_shift = 0;
-    while (i > 1) {
-	sbinfo->block_shift++;
-	i >>= 1;
-    }
-    sbinfo->root_inode = le32_to_cpu(ps2sb->rootdir);
-    if (sbinfo->root_inode < (0x400000 / le32_to_cpu(ps2sb->blocksize)) + 2) {
-	ps2fs_warning(sb, "ps2fs_read_super", "root inode number (%d) too"
-		      " small", sbinfo->root_inode);
-    }
-    sbinfo->tzoffset = opt_tzoffset*60;
-
-    /* Writing is experimental and these partitions hold PSBBN's own data
-     * (see README), so mount read-only unless explicitly asked not to. */
-    sbinfo->flags = opt_unsafe_write ? PS2FS_MOUNT_UNSAFE_WRITE : 0;
-    if (!opt_unsafe_write) {
-	sb->s_flags |= MS_RDONLY;
-    } else if (!(sb->s_flags & MS_RDONLY)) {
-	printk(KERN_WARNING "ps2fs: unsafe_write: writing to files is "
-	       "experimental and may corrupt the partition\n");
-    }
-
-    /* Free the superblock data */
-    brelse(bh);
-
-    /* Set various superblock entries */
-    sb->s_blocksize = blocksize;
-    sb->s_blocksize_bits = 0;
-    i = blocksize;
-    while (i > 1) {
-	sb->s_blocksize_bits++;
-	i >>= 1;
-    }
-
-    /* Retrieve root inode */
+    set_blocksize(sb->s_dev, 512);
+    sb->s_blocksize = 512;
+    sb->s_blocksize_bits = 9;
+    sb->s_maxbytes = (loff_t)1 << 40;
+    sb->s_magic = PS2FS_SUPER_MAGIC;
     sb->s_op = &ps2fs_sops;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-    sb->s_root = d_alloc_root(iget(sb, sbinfo->root_inode));
-#else
-    sb->s_root = d_alloc_root(iget(sb, sbinfo->root_inode), NULL);
-#endif
-    if (!sb->s_root
-     || !S_ISDIR(sb->s_root->d_inode->i_mode)
-     || !sb->s_root->d_inode->i_blocks
-     || !sb->s_root->d_inode->i_size
-    ) {
-	if (sb->s_root) {
-	    ps2fs_error(sb, "ps2fs_read_super", "root inode corrupt!"
-			" (mode=0%o blocks=%d size=%ld)",
-			sb->s_root->d_inode->i_mode,
-			sb->s_root->d_inode->i_blocks,
-			sb->s_root->d_inode->i_size);
-	    dput(sb->s_root);
-	    sb->s_root = NULL;
-	} else {
-	    ps2fs_error(sb, "ps2fs_read_super", "unable to read root inode");
-	}
-	return NULL;
+
+    n = find_partition(sb->s_dev, 512, *opt.partition ? opt.partition : NULL,
+		       sbi->part_start, sbi->part_size);
+    if (n < 0)
+	goto fail;
+    sbi->n_subparts = n;
+    if (read_pfs_super(sb, silent, &fsck_stat))
+	goto fail;
+    sbi->max_tblocks = ((sbi->log.count << sbi->sector_shift) - 2) / 2;
+    if (sbi->max_tblocks > PS2FS_JOURNAL_SLOTS)
+	sbi->max_tblocks = PS2FS_JOURNAL_SLOTS;
+
+    /* PSBBN keeps its own data here (see README): read-only unless asked */
+    if (!opt.unsafe_write)
+	sb->s_flags |= MS_RDONLY;
+    if (!(sb->s_flags & MS_RDONLY) && start_writing(sb, fsck_stat)) {
+	printk(KERN_WARNING "ps2fs: mounting read-only\n");
+	sb->s_flags |= MS_RDONLY;
+    }
+    if (!sbi->writable) {
+	down(&sbi->lock);
+	ps2fs_journal_check(sb);
+	n = ps2fs_count_free(sb);
+	up(&sbi->lock);
+	if (n)
+	    goto fail;
     }
 
-    /* Successful completion */
+    root = iget(sb, PS2FS_MAKE_INUM(sbi->root.number, sbi->root.subpart));
+    if (!root || is_bad_inode(root) || !S_ISDIR(root->i_mode)) {
+	ps2fs_error(sb, "ps2fs_read_super", "unable to read root directory");
+	if (root)
+	    iput(root);
+	goto fail;
+    }
+    sb->s_root = d_alloc_root(root);
+    if (!sb->s_root) {
+	iput(root);
+	goto fail;
+    }
     return sb;
+
+  fail:
+    sb->u.generic_sbp = NULL;
+    kfree(sbi);
+    return NULL;
 }
 
 /*************************************************************************/
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-static int ps2fs_statfs(struct super_block *sb, struct statfs *sf)
-#else
-static int ps2fs_statfs(struct super_block *sb, struct statfs *sf, int bufsiz)
-#endif
+static void ps2fs_put_super(struct super_block *sb)
 {
-    struct ps2fs_sb_info *sbinfo = PS2FS_SB(sb);
-    long count, size;
-    int i;
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
 
-    size = 0;
-    for (i = 0; i < sbinfo->n_subparts; i++)
-	size += sbinfo->size[i];
-    count = count_used_blocks(sb);
-    if (count < 0)
-	return count;
+    down(&sbi->lock);
+    if (sbi->writable)
+	ps2fs_commit(sb);
+    up(&sbi->lock);
+    sb->u.generic_sbp = NULL;
+    kfree(sbi);
+}
+
+/* Called by sync and by kupdate every few seconds while s_dirt is set */
+static void ps2fs_write_super(struct super_block *sb)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+
+    down(&sbi->lock);
+    ps2fs_commit(sb);
+    up(&sbi->lock);
+}
+
+static int ps2fs_statfs(struct super_block *sb, struct statfs *sf)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+
     sf->f_type = PS2FS_SUPER_MAGIC;
-    sf->f_bsize = sb->s_blocksize;
-    sf->f_blocks = size - (sbinfo->root_inode << sbinfo->block_shift);
-    sf->f_bfree = sf->f_blocks - count;
+    sf->f_bsize = sbi->zone_size;
+    down(&sbi->lock);
+    sf->f_blocks = sbi->total_zones;
+    sf->f_bfree = sbi->free_zones;
+    up(&sbi->lock);
     sf->f_bavail = sf->f_bfree;
     sf->f_files = -1;
     sf->f_ffree = -1;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
     sf->f_fsid.val[0] = -1;
     sf->f_fsid.val[1] = -1;
-#endif
     sf->f_namelen = PS2FS_NAME_LEN;
     return 0;
 }
 
-/*************************************************************************/
-
 static int ps2fs_remount_fs(struct super_block *sb, int *flags, char *data)
 {
-    /* Read-write needs the unsafe_write option of the original mount */
-    if (!(*flags & MS_RDONLY)
-	&& !(PS2FS_SB(sb)->flags & PS2FS_MOUNT_UNSAFE_WRITE))
-	return -EROFS;
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+    struct ps2fs_options opt;
+    __u32 fsck_stat = 0;
+    int err;
+
+    memset(&opt, 0, sizeof(opt));
+    if (!parse_options(data, &opt))
+	return -EINVAL;
+    if ((*flags & MS_RDONLY) && sbi->writable) {
+	down(&sbi->lock);
+	ps2fs_commit(sb);
+	sbi->writable = 0;
+	up(&sbi->lock);
+    } else if (!(*flags & MS_RDONLY) && !sbi->writable) {
+	/* read-write needs unsafe_write, now or at mount */
+	if (!opt.unsafe_write && !sbi->unsafe_write)
+	    return -EROFS;
+	sbi->unsafe_write = 1;
+	if ((err = read_pfs_super(sb, 0, &fsck_stat)))
+	    return err;
+	if ((err = start_writing(sb, fsck_stat)))
+	    return err;
+    }
     return 0;
 }
 
 /*************************************************************************/
 /*************************************************************************/
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
 
 static DECLARE_FSTYPE_DEV(ps2fs_fs_type, "ps2fs", ps2fs_read_super);
 
@@ -296,22 +349,6 @@ static void __exit exit_ps2fs_fs(void)
     unregister_filesystem(&ps2fs_fs_type);
 }
 
-#else
-
-static struct file_system_type ps2fs_fs_type = {
-    "ps2fs", FS_REQUIRES_DEV, ps2fs_read_super, NULL
-};
-
-__initfunc(int init_ps2fs_fs(void))
-{
-    return register_filesystem(&ps2fs_fs_type);
-}
-
-#endif
-
-/*************************************************************************/
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
 MODULE_AUTHOR("Andrew Church <achurch@achurch.org>");
 MODULE_DESCRIPTION("Playstation 2 filesystem");
 MODULE_LICENSE("GPLish");
@@ -320,15 +357,3 @@ EXPORT_NO_SYMBOLS;
 
 module_init(init_ps2fs_fs)
 module_exit(exit_ps2fs_fs)
-
-#else
-
-EXPORT_NO_SYMBOLS;
-
-int init_module(void) { return init_ps2fs_fs(); }
-
-void cleanup_module(void) { unregister_filesystem(&ps2fs_fs_type); }
-
-#endif
-
-/*************************************************************************/

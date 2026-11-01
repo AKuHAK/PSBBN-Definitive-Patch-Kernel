@@ -1,763 +1,611 @@
 /*
- * ps2fs/inode.c
+ * ps2fs/inode.c: inodes, regular files and symbolic links
  *
  * Copyright (c) 2002 Andrew Church <achurch@achurch.org>
+ *
+ * File data goes through the page cache (get_block maps 512-byte blocks
+ * to zones); the inode itself is metadata and changes only inside a
+ * journal transaction (journal.c).  Zones are allocated a zone at a time
+ * while the file grows, and the size on disk never exceeds what is
+ * allocated and initialised (mmu_private, as in the FAT driver).
  */
 
 #include <linux/config.h>
-#include <linux/version.h>
-#include <linux/string.h>
 #include <linux/fs.h>
-#include <linux/slab.h>
-#include <linux/init.h>
 #include <linux/locks.h>
-#include <linux/blkdev.h>
-#include <asm/uaccess.h>
+#include <linux/mm.h>
+#include <linux/pagemap.h>
+#include <linux/slab.h>
+#include <linux/smp_lock.h>
+#include <linux/string.h>
 
 #include "ps2fs_fs.h"
-#include "ps2fs_fs_sb.h"
-#include "ps2fs_fs_i.h"
 
 /*************************************************************************/
 
-/* for inode versions */
-static unsigned long version = 0;
+static int ps2fs_readlink(struct dentry *dentry, char *buf, int buflen);
+static int ps2fs_follow_link(struct dentry *dentry, struct nameidata *nd);
+static void ps2fs_truncate(struct inode *inode);
+static int ps2fs_file_open(struct inode *inode, struct file *file);
+static int ps2fs_file_release(struct inode *inode, struct file *file);
+static int ps2fs_fsync(struct file *file, struct dentry *dentry, int datasync);
 
 /*************************************************************************/
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-static int ps2fs_readpage(struct file *file, struct page *page);
-static int ps2fs_writepage(struct page *page);
+/* Target of a symlink, stored in the inode from offset 0x30 */
+#define SYMLINK_TARGET(raw)	((char *)(raw) + 0x30)
+
+static void raw_set_now(struct inode *inode, struct ps2fs_inode *raw)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(inode->i_sb);
+
+    inode->i_atime = inode->i_ctime = inode->i_mtime = CURRENT_TIME;
+    to_ps2time(&raw->atime, inode->i_atime, sbi->tzoffset);
+    raw->ctime = raw->mtime = raw->atime;
+}
+
+/* Copy times and (for regular files) the size into the raw inode */
+static void raw_update(struct inode *inode)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(inode->i_sb);
+    struct ps2fs_inode_info *ii = PS2FS_I(inode);
+    loff_t size;
+
+    to_ps2time(&ii->raw.atime, inode->i_atime, sbi->tzoffset);
+    to_ps2time(&ii->raw.ctime, inode->i_ctime, sbi->tzoffset);
+    to_ps2time(&ii->raw.mtime, inode->i_mtime, sbi->tzoffset);
+    if (S_ISREG(inode->i_mode)) {
+	/* never claim bytes that are not allocated and written */
+	size = inode->i_size;
+	if (size > ii->mmu_private)
+	    size = ii->mmu_private;
+	ii->raw.size_lo = cpu_to_le32((__u32)size);
+	ii->raw.size_hi = cpu_to_le32((__u32)(size >> 32));
+    }
+}
+
+/* Linux mode from the PFS mode.  Sony ignores the permission bits except
+ * for execute, so reading is always allowed. */
+static mode_t linux_mode(struct ps2fs_inode *raw)
+{
+    __u16 mode = le16_to_cpu(raw->mode);
+
+    switch (mode & PS2FS_TYPE_MASK) {
+      case PS2FS_TYPE_DIR:
+	return S_IFDIR | (mode & 07777) | 0555;
+      case PS2FS_TYPE_SYMLINK:
+	return S_IFLNK | 0777;
+      default:
+	return S_IFREG | (mode & 07777) | 0444;
+    }
+}
+
+void ps2fs_set_inode_ops(struct inode *inode)
+{
+    if (S_ISDIR(inode->i_mode)) {
+	inode->i_op = &ps2fs_dir_iops;
+	inode->i_fop = &ps2fs_dops;
+    } else if (S_ISLNK(inode->i_mode)) {
+	inode->i_op = &ps2fs_symlink_iops;
+    } else {
+	inode->i_op = &ps2fs_file_iops;
+	inode->i_fop = &ps2fs_fops;
+	inode->i_mapping->a_ops = &ps2fs_aops;
+    }
+}
+
+/*************************************************************************/
+
+void ps2fs_read_inode(struct inode *inode)
+{
+    struct super_block *sb = inode->i_sb;
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+    struct ps2fs_inode_info *ii;
+    struct ps2fs_inode *raw;
+    __u16 sub = PS2FS_SUBPART(inode->i_ino);
+    __u32 zone = PS2FS_ZONE(inode->i_ino), type;
+    int err;
+
+    ii = kmalloc(sizeof(*ii), GFP_KERNEL);
+    if (!ii) {
+	make_bad_inode(inode);
+	return;
+    }
+    memset(ii, 0, sizeof(*ii));
+    inode->u.generic_ip = ii;
+    raw = &ii->raw;
+
+    if (sub >= sbi->n_subparts || zone < 2
+	|| ((zone + 1) << sbi->sector_shift) > sbi->part_size[sub]) {
+	ps2fs_error(sb, "ps2fs_read_inode", "bad inode number 0x%08lX",
+		    inode->i_ino);
+	goto bad;
+    }
+    down(&sbi->lock);
+    err = ps2fs_read_block(sb, sub, zone << sbi->block_shift, raw);
+    if (!err && (le32_to_cpu(raw->magic) != PS2FS_SEGD_MAGIC
+		 || le32_to_cpu(raw->checksum) != ps2fs_checksum(raw)
+		 || le32_to_cpu(raw->inode_block.number) != zone
+		 || le16_to_cpu(raw->inode_block.subpart) != sub)) {
+	ps2fs_error(sb, "ps2fs_read_inode", "inode 0x%08lX is corrupt",
+		    inode->i_ino);
+	err = -EIO;
+    }
+    if (!err)
+	err = ps2fs_load_chain(inode);
+    up(&sbi->lock);
+    if (err)
+	goto bad;
+
+    type = le16_to_cpu(raw->mode) & PS2FS_TYPE_MASK;
+    if (type != PS2FS_TYPE_DIR && type != PS2FS_TYPE_FILE
+	&& type != PS2FS_TYPE_SYMLINK) {
+	ps2fs_error(sb, "ps2fs_read_inode", "inode 0x%08lX has unknown type "
+		    "0x%04X", inode->i_ino, type);
+	goto bad;
+    }
+    inode->i_mode = linux_mode(raw);
+    inode->i_nlink = 1;
+    inode->i_uid = sbi->uid;
+    inode->i_gid = sbi->gid;
+    if (type == PS2FS_TYPE_SYMLINK) {
+	SYMLINK_TARGET(raw)[PS2FS_SYMLINK_MAX] = 0;
+	inode->i_size = strlen(SYMLINK_TARGET(raw));
+    } else {
+	inode->i_size = le32_to_cpu(raw->size_lo)
+	    | ((loff_t)le32_to_cpu(raw->size_hi) << 32);
+	if (inode->i_size > (loff_t)ps2fs_data_zones(inode) * sbi->zone_size) {
+	    ps2fs_error(sb, "ps2fs_read_inode", "inode 0x%08lX: size beyond "
+			"its zones", inode->i_ino);
+	    goto bad;
+	}
+    }
+    ii->mmu_private = inode->i_size;
+    inode->i_atime = from_ps2time(&raw->atime, sbi->tzoffset);
+    inode->i_ctime = from_ps2time(&raw->ctime, sbi->tzoffset);
+    inode->i_mtime = from_ps2time(&raw->mtime, sbi->tzoffset);
+    inode->i_blksize = sbi->zone_size;
+    inode->i_blocks = le32_to_cpu(raw->number_blocks) << sbi->sector_shift;
+    ps2fs_set_inode_ops(inode);
+    return;
+
+  bad:
+    ps2fs_free_chain_memory(inode);
+    kfree(ii);
+    inode->u.generic_ip = NULL;
+    make_bad_inode(inode);
+}
+
+void ps2fs_write_inode(struct inode *inode, int wait)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(inode->i_sb);
+
+    if (is_bad_inode(inode) || !PS2FS_I(inode) || !inode->i_nlink
+	|| !sbi->writable)
+	return;
+    down(&sbi->lock);
+    raw_update(inode);
+    if (!ps2fs_write_raw(inode) && wait)
+	ps2fs_commit(inode->i_sb);
+    up(&sbi->lock);
+}
+
+/* Last reference to an unlinked inode: free all of its zones */
+void ps2fs_delete_inode(struct inode *inode)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(inode->i_sb);
+
+    if (!is_bad_inode(inode) && PS2FS_I(inode) && sbi->writable) {
+	down(&sbi->lock);
+	if (!ps2fs_free_inode_zones(inode))
+	    ps2fs_commit(inode->i_sb);
+	up(&sbi->lock);
+    }
+    clear_inode(inode);
+}
+
+void ps2fs_clear_inode(struct inode *inode)
+{
+    if (PS2FS_I(inode)) {
+	ps2fs_free_chain_memory(inode);
+	kfree(PS2FS_I(inode));
+	inode->u.generic_ip = NULL;
+    }
+}
+
+/*************************************************************************/
+
+/* Build a new inode (and the first block of a directory) in the open
+ * transaction.  Called with sbi->lock held; the caller links it into the
+ * directory and then reads it with iget(). */
+
+/* Subpart for a new directory: the parent's round-robin cursor, unless
+ * that subpart is much fuller than the volume as a whole */
+static __u16 choose_subpart(struct super_block *sb, struct ps2fs_inode *praw)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+    __u32 c = le32_to_cpu(praw->subpart), i, best = 0, pct, max = 0;
+    __u32 overall, this;
+
+    c = c < sbi->n_subparts - 1 ? c + 1 : 0;
+    praw->subpart = cpu_to_le32(c);
+    overall = sbi->free_zones / (sbi->total_zones / 100 + 1);
+    this = sbi->free_zone[c]
+	/ ((sbi->part_size[c] >> sbi->sector_shift) / 100 + 1);
+    if (this >= overall || overall - this < 11)
+	return c;
+    for (i = 0; i < sbi->n_subparts; i++) {
+	pct = sbi->free_zone[i]
+	    / ((sbi->part_size[i] >> sbi->sector_shift) / 100 + 1);
+	if (pct > max) {
+	    max = pct;
+	    best = i;
+	}
+    }
+    return best;
+}
+
+static void put_dirent(char *p, const struct ps2fs_blockinfo *target,
+		       const char *name, int len, __u16 size_type)
+{
+    struct ps2fs_dirent *de = (struct ps2fs_dirent *)p;
+
+    de->inode = target->number;
+    de->subpart = le16_to_cpu(target->subpart);
+    de->namelen = len;
+    de->size_type = cpu_to_le16(size_type);
+    memcpy(de->name, name, len);
+}
+
+int ps2fs_new_inode(struct inode *dir, int type, int perm,
+		    const char *symlink, struct ps2fs_blockinfo *where)
+{
+    struct super_block *sb = dir->i_sb;
+    struct ps2fs_sb_info *sbi = PS2FS_SB(sb);
+    struct ps2fs_inode *praw = &PS2FS_I(dir)->raw, *raw;
+    struct ps2fs_blockinfo e, d;
+    struct ps2fs_tblock *tb;
+    int err = -EIO;
+
+    if (type == PS2FS_TYPE_DIR) {
+	e.number = 0;
+	e.subpart = cpu_to_le16(choose_subpart(sb, praw));
+    } else {
+	e = praw->inode_block;
+    }
+    e.count = cpu_to_le16(1);
+    if ((err = ps2fs_alloc(sb, &e, 2)))
+	return err;
+    d = e;
+    if (type == PS2FS_TYPE_DIR && (err = ps2fs_alloc(sb, &d, 0))) {
+	ps2fs_free(sb, &e);
+	return err;
+    }
+
+    raw = kmalloc(sizeof(*raw), GFP_NOFS);
+    if (!raw) {
+	err = -ENOMEM;
+	goto fail;
+    }
+    memset(raw, 0, sizeof(*raw));
+    raw->magic = cpu_to_le32(PS2FS_SEGD_MAGIC);
+    raw->inode_block = raw->last_segment = raw->data[0] = e;
+    raw->mode = cpu_to_le16(type | (perm & 07777));
+    raw->uid = raw->gid = cpu_to_le16(PS2FS_ID_NONE);
+    to_ps2time(&raw->atime, CURRENT_TIME, sbi->tzoffset);
+    raw->ctime = raw->mtime = raw->atime;
+    raw->number_data = raw->number_blocks = cpu_to_le32(1);
+    raw->number_segdesg = cpu_to_le32(1);
+    raw->subpart = cpu_to_le32(le16_to_cpu(e.subpart));
+    if (type == PS2FS_TYPE_DIR) {
+	raw->attr = cpu_to_le16(PS2FS_ATTR_NEWDIR);
+	raw->size_lo = cpu_to_le32(512);
+	raw->data[1] = d;
+	raw->number_data = raw->number_blocks = cpu_to_le32(2);
+    } else if (type == PS2FS_TYPE_SYMLINK) {
+	raw->mode = cpu_to_le16(PS2FS_TYPE_SYMLINK | 0777);
+	strcpy(SYMLINK_TARGET(raw), symlink);
+    }
+    raw->checksum = cpu_to_le32(ps2fs_checksum(raw));
+
+    tb = ps2fs_tblock_get(sb, le16_to_cpu(e.subpart),
+			  le32_to_cpu(e.number) << sbi->block_shift, 1);
+    if (!tb)
+	goto fail_free;
+    memcpy(tb->bh[0]->b_data, raw, 512);
+    memcpy(tb->bh[1]->b_data, (char *)raw + 512, 512);
+
+    if (type == PS2FS_TYPE_DIR) {
+	tb = ps2fs_tblock_get(sb, le16_to_cpu(d.subpart),
+			      le32_to_cpu(d.number) << sbi->block_shift, 1);
+	if (!tb)
+	    goto fail_free;
+	put_dirent(tb->bh[0]->b_data, &e, ".", 1, PS2FS_TYPE_DIR | 12);
+	put_dirent(tb->bh[0]->b_data + 12, &praw->inode_block, "..", 2,
+		   PS2FS_TYPE_DIR | 500);
+    } else {
+	/* empty attribute area */
+	tb = ps2fs_tblock_get(sb, le16_to_cpu(e.subpart),
+			      (le32_to_cpu(e.number) << sbi->block_shift) + 1, 1);
+	if (!tb)
+	    goto fail_free;
+	((__u16 *)tb->bh[0]->b_data)[1] = cpu_to_le16(1024);
+    }
+    kfree(raw);
+    *where = e;
+    return 0;
+
+  fail_free:
+    kfree(raw);
+  fail:
+    ps2fs_free(sb, &e);
+    if (type == PS2FS_TYPE_DIR)
+	ps2fs_free(sb, &d);
+    return err;
+}
+
+/*************************************************************************/
+
+static int ps2fs_get_block(struct inode *inode, long iblock,
+			   struct buffer_head *bh_result, int create)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(inode->i_sb);
+    struct ps2fs_inode_info *ii = PS2FS_I(inode);
+    unsigned long pos = (unsigned long)iblock << 9;
+    __u32 zi = iblock >> sbi->sector_shift, zone;
+    __u16 sub;
+    int err = 0;
+
+    if (iblock < 0)
+	return -EIO;
+    down(&sbi->lock);
+    if (pos < ii->mmu_private || !create) {
+	if (pos < ii->mmu_private && !ps2fs_map(inode, zi, &sub, &zone)) {
+	    bh_result->b_dev = inode->i_dev;
+	    bh_result->b_blocknr = sbi->part_start[sub]
+		+ (zone << sbi->sector_shift)
+		+ (iblock & ((1 << sbi->sector_shift) - 1));
+	    bh_result->b_state |= 1UL << BH_Mapped;
+	}
+	goto out;
+    }
+    /* cont_prepare_write() extends files one block at a time */
+    if (pos != ii->mmu_private) {
+	err = -EIO;
+	goto out;
+    }
+    if (!sbi->writable || sbi->error) {
+	err = -EROFS;
+	goto out;
+    }
+    if (ps2fs_map(inode, zi, &sub, &zone)) {
+	if ((err = ps2fs_grow(inode, 1)))
+	    goto out;
+	if (ps2fs_map(inode, zi, &sub, &zone)) {
+	    err = -EIO;
+	    goto out;
+	}
+	inode->i_blocks = le32_to_cpu(ii->raw.number_blocks)
+	    << sbi->sector_shift;
+    }
+    bh_result->b_dev = inode->i_dev;
+    bh_result->b_blocknr = sbi->part_start[sub] + (zone << sbi->sector_shift)
+	+ (iblock & ((1 << sbi->sector_shift) - 1));
+    bh_result->b_state |= (1UL << BH_Mapped) | (1UL << BH_New);
+    ii->mmu_private += 512;
+  out:
+    up(&sbi->lock);
+    return err;
+}
+
+static int ps2fs_readpage(struct file *file, struct page *page)
+{
+    return block_read_full_page(page, ps2fs_get_block);
+}
+
+static int ps2fs_writepage(struct page *page)
+{
+    return block_write_full_page(page, ps2fs_get_block);
+}
+
 static int ps2fs_prepare_write(struct file *file, struct page *page,
-			       unsigned int from, unsigned int to);
-#else /* < 2.4.0 */
-static int ps2fs_file_write(struct file *file, const char *buf, size_t count,
-			    loff_t *ppos);
-#endif
+			       unsigned from, unsigned to)
+{
+    return cont_prepare_write(page, from, to, ps2fs_get_block,
+			      &PS2FS_I(page->mapping->host)->mmu_private);
+}
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
+static int ps2fs_bmap(struct address_space *mapping, long block)
+{
+    return generic_block_bmap(mapping, block, ps2fs_get_block);
+}
+
 struct address_space_operations ps2fs_aops = {
     readpage:		ps2fs_readpage,
     writepage:		ps2fs_writepage,
     sync_page:		block_sync_page,
     prepare_write:	ps2fs_prepare_write,
     commit_write:	generic_commit_write,
-    /* bmap:		ps2fs_bmap, */
+    bmap:		ps2fs_bmap,
 };
-#endif
+
+/*************************************************************************/
+
+/* Called by vmtruncate() once i_size is set (with the kernel lock held) */
+static void ps2fs_truncate(struct inode *inode)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(inode->i_sb);
+    struct ps2fs_inode_info *ii = PS2FS_I(inode);
+    __u32 keep;
+
+    if (!S_ISREG(inode->i_mode) || !sbi->writable)
+	return;
+    down(&sbi->lock);
+    if (ii->mmu_private > inode->i_size)
+	ii->mmu_private = inode->i_size;
+    keep = (ii->mmu_private + sbi->zone_size - 1) >> (sbi->sector_shift + 9);
+    inode->i_mtime = inode->i_ctime = CURRENT_TIME;
+    raw_update(inode);
+    if (!ps2fs_shrink(inode, keep))
+	ps2fs_write_raw(inode);
+    inode->i_blocks = le32_to_cpu(ii->raw.number_blocks) << sbi->sector_shift;
+    ps2fs_commit(inode->i_sb);
+    up(&sbi->lock);
+}
+
+/* Allocate and zero-fill a file up to `size' bytes (generic_cont_expand()
+ * of later kernels); the caller sets the size itself afterwards */
+static int cont_expand(struct inode *inode, loff_t size)
+{
+    struct page *page;
+    unsigned long limit = current->rlim[RLIMIT_FSIZE].rlim_cur;
+    unsigned offset;
+    int err;
+
+    if (limit != RLIM_INFINITY && size > (loff_t)limit) {
+	send_sig(SIGXFSZ, current, 0);
+	return -EFBIG;
+    }
+    if (size > inode->i_sb->s_maxbytes)
+	return -EFBIG;
+    /* prepare_write skips a block when from == to == its start */
+    offset = (size & (PAGE_CACHE_SIZE - 1)) | 1;
+    page = grab_cache_page(inode->i_mapping, size >> PAGE_CACHE_SHIFT);
+    if (!page)
+	return -ENOMEM;
+    err = ps2fs_prepare_write(NULL, page, offset, offset);
+    if (!err)
+	err = generic_commit_write(NULL, page, offset, offset);
+    UnlockPage(page);
+    page_cache_release(page);
+    return err > 0 ? 0 : err;
+}
+
+int ps2fs_setattr(struct dentry *dentry, struct iattr *attr)
+{
+    struct inode *inode = dentry->d_inode;
+    struct ps2fs_sb_info *sbi = PS2FS_SB(inode->i_sb);
+    struct ps2fs_inode_info *ii = PS2FS_I(inode);
+    int err;
+
+    /* PFS keeps no owners: Sony stores 0xFFFF everywhere */
+    if (((attr->ia_valid & ATTR_UID) && attr->ia_uid != inode->i_uid)
+	|| ((attr->ia_valid & ATTR_GID) && attr->ia_gid != inode->i_gid))
+	return -EPERM;
+    attr->ia_valid &= ~(ATTR_UID | ATTR_GID);
+    if ((err = inode_change_ok(inode, attr)))
+	return err;
+    if (attr->ia_valid & ATTR_SIZE) {
+	if (!S_ISREG(inode->i_mode))
+	    return -EINVAL;
+	if (attr->ia_size > inode->i_size
+	    && (err = cont_expand(inode, attr->ia_size)))
+	    return err;
+    }
+    if ((err = inode_setattr(inode, attr)))
+	return err;
+    if ((attr->ia_valid & ATTR_MODE) && !S_ISLNK(inode->i_mode)) {
+	down(&sbi->lock);
+	ii->raw.mode = cpu_to_le16((le16_to_cpu(ii->raw.mode)
+				    & PS2FS_TYPE_MASK)
+				   | (attr->ia_mode & 07777));
+	up(&sbi->lock);
+	inode->i_mode = linux_mode(&ii->raw);
+    }
+    /* times and mode reach the disk through write_inode */
+    return 0;
+}
+
+/*************************************************************************/
+
+/* Sony clears CLOSED (persistently) while a file is open for writing and
+ * sets it again, with fresh times, at the last close */
+static int ps2fs_file_open(struct inode *inode, struct file *file)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(inode->i_sb);
+    struct ps2fs_inode_info *ii = PS2FS_I(inode);
+    int err = 0;
+
+    if (!(file->f_mode & FMODE_WRITE))
+	return 0;
+    down(&sbi->lock);
+    if (ii->writers++ == 0
+	&& (le16_to_cpu(ii->raw.attr) & PS2FS_ATTR_CLOSED)) {
+	ii->raw.attr &= cpu_to_le16(~PS2FS_ATTR_CLOSED);
+	err = ps2fs_write_raw(inode);
+	if (!err)
+	    err = ps2fs_commit(inode->i_sb);
+	if (err)
+	    ii->writers--;
+    }
+    up(&sbi->lock);
+    return err;
+}
+
+static int ps2fs_file_release(struct inode *inode, struct file *file)
+{
+    struct ps2fs_sb_info *sbi = PS2FS_SB(inode->i_sb);
+    struct ps2fs_inode_info *ii = PS2FS_I(inode);
+
+    if (!(file->f_mode & FMODE_WRITE))
+	return 0;
+    down(&sbi->lock);
+    if (--ii->writers == 0 && inode->i_nlink && sbi->writable) {
+	raw_set_now(inode, &ii->raw);
+	raw_update(inode);
+	ii->raw.attr |= cpu_to_le16(PS2FS_ATTR_CLOSED);
+	if (!ps2fs_write_raw(inode))
+	    ps2fs_commit(inode->i_sb);
+    }
+    up(&sbi->lock);
+    return 0;
+}
+
+static int ps2fs_fsync(struct file *file, struct dentry *dentry, int datasync)
+{
+    struct inode *inode = dentry->d_inode;
+    struct ps2fs_sb_info *sbi = PS2FS_SB(inode->i_sb);
+    int err;
+
+    down(&sbi->lock);
+    raw_update(inode);
+    err = ps2fs_write_raw(inode);
+    if (!err)
+	err = ps2fs_commit(inode->i_sb);	/* writes the data first */
+    up(&sbi->lock);
+    return err;
+}
 
 struct file_operations ps2fs_fops = {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
     llseek:	generic_file_llseek,
     read:	generic_file_read,
     write:	generic_file_write,
     mmap:	generic_file_mmap,
-    open:	generic_file_open,
-#else
-    read:	generic_file_read,
-    write:	ps2fs_file_write,
-    mmap:	generic_file_mmap,
-#endif
+    open:	ps2fs_file_open,
+    release:	ps2fs_file_release,
+    fsync:	ps2fs_fsync,
 };
 
 struct inode_operations ps2fs_file_iops = {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,0)
-    default_file_ops: &ps2fs_fops,
-    readpage:	generic_readpage,
-    bmap:	ps2fs_bmap,
-#endif
     truncate:	ps2fs_truncate,
+    setattr:	ps2fs_setattr,
 };
 
 /*************************************************************************/
-/*************************************************************************/
 
-/* Read an inode into the given buffer (ps2inode) and check its magic
- * number and checksum.  Returns 0 on success, negative on error.
- */
-
-static int ps2fs_read_raw_inode(struct inode *inode,
-				struct ps2fs_inode *ps2inode)
+static int ps2fs_readlink(struct dentry *dentry, char *buf, int buflen)
 {
-    __u32 *inodebuf = (__u32 *)ps2inode;
-    struct buffer_head *bh;
-    unsigned long sector;
-    __u32 checksum;
-    unsigned int i;
-
-    /* Calculate sector number */
-    sector = PS2FS_SB(inode->i_sb)->first_sector[PS2FS_SUBPART(inode->i_ino)]
-	   + (PS2FS_BNUM(inode->i_ino) << PS2FS_SB(inode->i_sb)->block_shift);
-
-    /* Try to read the inode data in */
-    if (inode->i_sb->s_blocksize >= 1024 /*sizeof(struct ps2fs_inode)*/) {
-	bh = bread(inode->i_dev, sector, inode->i_sb->s_blocksize);
-	if (!bh)
-	    goto bad_block;
-	memcpy(inodebuf, bh->b_data, 1024);
-	brelse(bh);
-    } else if (inode->i_sb->s_blocksize == 512) {
-	bh = bread(inode->i_dev, sector, 512);
-	if (!bh)
-	    goto bad_block;
-	memcpy(inodebuf, bh->b_data, 512);
-	brelse(bh);
-	sector++;
-	bh = bread(inode->i_dev, sector, 512);
-	if (!bh)
-	    goto bad_block;
-	memcpy(inodebuf+128, bh->b_data, 512);
-	brelse(bh);
-    } else {
-	ps2fs_error(inode->i_sb, "ps2fs_read_raw_inode", "unsupported block"
-		    " size %lu", inode->i_sb->s_blocksize);
-	return -EIO;
-    }
-
-    /* Sanity-check the read-in data */
-    if (le32_to_cpu(ps2inode->magic) != PS2FS_INODE_MAGIC) {
-	ps2fs_error(inode->i_sb, "ps2fs_read_raw_inode", "bad magic number"
-		    " for inode 0x%08lX", inode->i_ino);
-	return -EIO;
-    }
-    checksum = 0;
-    for (i = 1; i < 255; i++)
-	checksum += le32_to_cpu(inodebuf[i]);
-    if (checksum != le32_to_cpu(ps2inode->checksum)) {
-	ps2fs_error(inode->i_sb, "ps2fs_read_raw_inode", "bad checksum for"
-		    " inode 0x%08lX", inode->i_ino);
-	return -EIO;
-    }
-
-    /* Success */
-    return 0;
-
-  bad_block:
-    ps2fs_error(inode->i_sb, "ps2fs_read_raw_inode", "unable to read inode"
-		" block (%lu)", sector);
-    return -EIO;
+    return vfs_readlink(dentry, buf, buflen,
+			SYMLINK_TARGET(&PS2FS_I(dentry->d_inode)->raw));
 }
 
-/*************************************************************************/
-
-/* Write an inode to disk (really to a bh), setting the checksum
- * appropriately.  The raw data is taken from ps2fs_inode_info.rawinode.
- * If `sync' is nonzero, physically write the data to disk.  Returns zero
- * on success, else error code.
- */
-
-static int ps2fs_write_raw_inode(struct inode *inode, int sync)
+static int ps2fs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
-    struct ps2fs_inode *ps2inode = PS2FS_INODE(inode)->rawinode;
-    __u32 *inodebuf = (__u32 *)ps2inode;
-    struct buffer_head *bh;
-    unsigned long sector;
-    __u32 checksum;
-    unsigned int i;
-
-    /* Sanity-check the data */
-    if (le32_to_cpu(ps2inode->magic) != PS2FS_INODE_MAGIC) {
-	ps2fs_error(inode->i_sb, "ps2fs_write_raw_inode", "bad magic number"
-		    " for inode 0x%08lX", inode->i_ino);
-	return -EIO;
-    }
-
-    /* Calculate checksum */
-    checksum = 0;
-    for (i = 1; i < 255; i++)
-	checksum += le32_to_cpu(inodebuf[i]);
-    ps2inode->checksum = cpu_to_le32(checksum);
-
-    /* Calculate sector number */
-    sector = PS2FS_SB(inode->i_sb)->first_sector[PS2FS_SUBPART(inode->i_ino)]
-	   + (PS2FS_BNUM(inode->i_ino) << PS2FS_SB(inode->i_sb)->block_shift);
-
-    /* Try to write the inode data out */
-    if (inode->i_sb->s_blocksize >= 1024 /*sizeof(struct ps2fs_inode)*/) {
-	bh = bread(inode->i_dev, sector, inode->i_sb->s_blocksize);
-	if (!bh)
-	    goto bad_block;
-	memcpy(bh->b_data, inodebuf, 1024);
-	mark_buffer_dirty_inode(bh, inode);
-	if (sync) {
-dprintk("syncing! 0x%08lX at 0x%08lX\n",inode->i_ino,bh->b_blocknr);
-	    ll_rw_block(WRITE, 1, &bh);
-	    wait_on_buffer(bh);
-	    if (!buffer_uptodate(bh))
-		goto bad_write;
-	}
-	brelse(bh);
-    } else if (inode->i_sb->s_blocksize == 512) {
-	struct buffer_head *bh2;
-	__u8 savebuf[512];  /* to save bh contents in case of bh2 write fail */
-
-	bh = bread(inode->i_dev, sector, 512);
-	if (!bh)
-	    goto bad_block;
-	sector++;
-	bh2 = bread(inode->i_dev, sector, 512);
-	if (!bh2)
-	    goto bad_block;
-	memcpy(savebuf, bh->b_data, 512);
-	memcpy(bh->b_data, inodebuf, 512);
-	memcpy(bh2->b_data, inodebuf+128, 512);
-	mark_buffer_dirty(bh);
-	mark_buffer_dirty_inode(bh2, inode);
-	if (sync) {
-dprintk("syncing 2! 0x%08lX at 0x%08lX size=%d\n",inode->i_ino,bh->b_blocknr,ps2inode->size);
-	    ll_rw_block(WRITE, 1, &bh);
-	    wait_on_buffer(bh);
-	    if (!buffer_uptodate(bh)) {
-		brelse(bh2);
-		goto bad_write;
-	    }
-	    ll_rw_block(WRITE, 1, &bh2);
-	    wait_on_buffer(bh2);
-	    if (!buffer_uptodate(bh2)) {
-		memcpy(bh->b_data, savebuf, 512);
-		mark_buffer_dirty(bh);
-		ll_rw_block(WRITE, 1, &bh);
-		wait_on_buffer(bh);
-		if (!buffer_uptodate(bh)) {
-		    ps2fs_error(inode->i_sb, "ps2fs_write_raw_inode",
-				"unable to recover half-written inode 0x%08lX",
-				inode->i_ino);
-		}
-		brelse(bh2);
-		goto bad_write;
-	    }
-	}
-	brelse(bh);
-	brelse(bh2);
-    } else {
-	ps2fs_error(inode->i_sb, "ps2fs_write_raw_inode", "unsupported"
-		    " block size %lu", inode->i_sb->s_blocksize);
-	return -EIO;
-    }
-
-    /* Success */
-    return 0;
-
-  bad_block:
-    ps2fs_error(inode->i_sb, "ps2fs_write_raw_inode", "unable to read inode"
-		" block (%lu)", sector);
-    return -EIO;
-  bad_write:
-    ps2fs_error(inode->i_sb, "ps2_write_raw_inode", "write of sector %lu"
-		" failed", sector);
-    brelse(bh);
-    return -EIO;
+    return vfs_follow_link(nd, SYMLINK_TARGET(&PS2FS_I(dentry->d_inode)->raw));
 }
 
-/*************************************************************************/
-/*************************************************************************/
-
-/* Create a new inode on the given device.  Returns the inode or an
- * ERR_PTR error value.  If successful, i_mode is set up for a normal file
- * (0644); it should be changed later if the inode is a directory.
- */
-
-struct inode *ps2fs_new_inode(struct super_block *sb)
-{
-    struct inode *inode;
-    struct ps2fs_inode *ps2inode;
-    long block;
-    int err;
-
-    /* Allocate memory for the raw inode buffer */
-    ps2inode = kmalloc(sizeof(*ps2inode), GFP_KERNEL);
-dprintk("+++ kmalloced *NEW*\n");
-    if (!ps2inode) {
-	ps2fs_error(sb, "ps2fs_new_inode", "no memory for raw inode");
-	return ERR_PTR(-ENOMEM);
-    }
-
-    /* Create the new inode's in-memory structure */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,0)
-    inode = get_empty_inode();
-#else
-    inode = new_inode(sb);
-#endif
-    if (!inode) {
-	err = -ENOMEM;
-	goto fail_kfree;
-    }
-
-    /* Obtain a free block, if possible */
-    block = get_new_block(sb, 0);
-    if (block < 0) {
-	err = (int)block;
-	goto fail_inode;
-    }
-
-    /* Set up the inode structure */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,0)
-    inode->i_sb = sb;
-    inode->i_dev = sb->s_dev;
-#endif
-    inode->i_ino = block;
-    inode->i_blksize = PAGE_SIZE;
-    inode->i_uid = 0;
-    inode->i_gid = 0;
-    inode->i_mode = S_IFREG | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
-    inode->i_size = 0;
-    inode->i_blocks = 0;
-    inode->i_atime = inode->i_ctime = inode->i_mtime = CURRENT_TIME;
-    inode->i_version = ++version;
-    PS2FS_INODE(inode)->rawinode = ps2inode;
-    memset(ps2inode, 0, sizeof(*ps2inode));
-    ps2inode->unknown1[0].number = cpu_to_le32(PS2FS_BNUM(block));
-    ps2inode->unknown1[0].subpart = PS2FS_SUBPART(block);
-    ps2inode->unknown1[0].count = cpu_to_le16(1);
-    ps2inode->unknown1[2] = ps2inode->unknown1[0];
-    ps2inode->unknown1[4] = ps2inode->unknown1[0];
-
-    /* Mark the inode dirty, to ensure it gets written back later */
-    mark_inode_dirty(inode);
-
-    /* Success, return the inode */
-    return inode;
-
-    /* Failure cleanup */
-  fail_inode:
-    make_bad_inode(inode);
-    iput(inode);
-  fail_kfree:
-dprintk("... kfreeing %08lX\n",inode->i_ino);
-    kfree(ps2inode);
-    return ERR_PTR(err);
-}
-
-/*************************************************************************/
-
-/* Read in the given inode. */
-
-void ps2fs_read_inode(struct inode *inode)
-{
-    struct super_block *sb = inode->i_sb;
-    struct ps2fs_sb_info *sbinfo = PS2FS_SB(sb);
-    struct ps2fs_inode *ps2inode = NULL;
-    unsigned long blocksize;
-
-dprintk("read_inode(%08lX) mode=%07o\n",inode->i_ino,(int)inode->i_mode);
-    /* Sanity check on inode number */
-    if (inode->i_ino < sbinfo->root_inode
-     || PS2FS_SUBPART(inode->i_ino) >= sbinfo->n_subparts
-     || PS2FS_BNUM(inode->i_ino) >=
-	    sbinfo->size[PS2FS_SUBPART(inode->i_ino)]>>sbinfo->block_shift
-    ) {
-	ps2fs_error(sb, "ps2fs_read_inode", "bad inode number: %lu",
-		    inode->i_ino);
-	goto bad_inode;
-    }
-
-    /* Allocate memory for the inode buffer */
-    ps2inode = kmalloc(sizeof(*ps2inode), GFP_KERNEL);
-dprintk("*** kmalloced 0x%08lX\n",inode->i_ino);
-    if (!ps2inode) {
-	ps2fs_error(sb, "ps2fs_read_inode", "0x%08lX: no memory for raw inode",
-		    inode->i_ino);
-	goto bad_inode;
-    }
-    /* Read the inode in */
-    if (ps2fs_read_raw_inode(inode, ps2inode) < 0)
-	goto bad_inode;
-
-    /* Copy/convert data into inode structure */
-    PS2FS_INODE(inode)->rawinode = ps2inode;
-    inode->i_atime = from_ps2time(&ps2inode->atime) - sbinfo->tzoffset;
-    inode->i_ctime = from_ps2time(&ps2inode->ctime) - sbinfo->tzoffset;
-    inode->i_mtime = from_ps2time(&ps2inode->mtime) - sbinfo->tzoffset;
-    inode->i_size = le32_to_cpu(ps2inode->size);
-    blocksize = 1 << (9+sbinfo->block_shift);
-    inode->i_blocks = (((inode->i_size + (blocksize-1)) & -blocksize) >> 9)
-                    + (blocksize>>9);  /* count inode block as well */
-    inode->i_mode = S_IRUSR | S_IRGRP | S_IROTH;
-    if (!(sb->s_flags & MS_RDONLY))
-	inode->i_mode |= S_IWUSR;
-    if (inode->i_ino == PS2FS_SB(sb)->root_inode
-     || 0  /* FIXME: how to determine this? */
-    ) {
-	inode->i_mode |= S_IFDIR | S_IXUSR | S_IXGRP | S_IXOTH;
-	inode->i_op = &ps2fs_dir_iops;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-	inode->i_fop = &ps2fs_dops;
-	inode->i_mapping->a_ops = &ps2fs_aops;
-#endif
-    } else {
-	inode->i_mode |= S_IFREG;
-	inode->i_op = &ps2fs_file_iops;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-	inode->i_fop = &ps2fs_fops;
-	inode->i_mapping->a_ops = &ps2fs_aops;
-#endif
-    }
-    inode->i_uid = 0;
-    inode->i_gid = 0;
-    inode->i_blksize = PAGE_SIZE;  /* optimal I/O size */
-    inode->i_version = ++version;
-
-    /* Success */
-    return;
-
-  bad_inode:
-    if (ps2inode) {
-dprintk("... kfreeing 0x%08lX\n",inode->i_ino);
-	kfree(ps2inode);
-    }
-    make_bad_inode(inode);
-}
-
-/*************************************************************************/
-
-/* Write out a modified inode, possibly with syncing afterwards.  Returns
- * zero on success, else error code.
- */
-
-int ps2fs_update_inode(struct inode *inode, int sync)
-{
-    struct super_block *sb = inode->i_sb;
-    struct ps2fs_sb_info *sbinfo = PS2FS_SB(sb);
-    struct ps2fs_inode *ps2inode = PS2FS_INODE(inode)->rawinode;
-
-dprintk("update_inode(0x%08lX,%d) size=%lu\n",inode->i_ino,sync,(long)inode->i_size);
-
-    /* Don't do anything to inodes with zero link count, they're going to
-     * go away anyway */
-    if (!inode->i_nlink)
-	return 0;
-
-    /* Sanity check on inode number and raw inode pointer */
-    if (inode->i_ino < sbinfo->root_inode
-     || PS2FS_SUBPART(inode->i_ino) >= sbinfo->n_subparts
-     || PS2FS_BNUM(inode->i_ino) >=
-	    sbinfo->size[PS2FS_SUBPART(inode->i_ino)]>>sbinfo->block_shift
-    ) {
-	ps2fs_error(sb, "ps2fs_update_inode", "bad inode number: 0x%08lX",
-		    inode->i_ino);
-	return -EINVAL;
-    }
-    if (!ps2inode) {
-	ps2fs_error(sb, "ps2fs_update_inode",
-		    "inode 0x%08lX: raw inode missing", inode->i_ino);
-	return -EINVAL;
-    }
-
-    if (sb->s_flags & MS_RDONLY)
-	return -EROFS;
-
-    /* Copy/convert data into raw inode structure */
-    to_ps2time(&ps2inode->atime, inode->i_atime + sbinfo->tzoffset);
-    to_ps2time(&ps2inode->ctime, inode->i_ctime + sbinfo->tzoffset);
-    to_ps2time(&ps2inode->mtime, inode->i_mtime + sbinfo->tzoffset);
-    ps2inode->size = cpu_to_le32(inode->i_size);
-
-    /* Write the raw inode out */
-    return ps2fs_write_raw_inode(inode, sync);
-}
-
-/*************************************************************************/
-
-/* Write out a modified inode (callback for superblock ops--return is void
- * rather than int, no second parameter in 2.2).
- */
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,0)
-void ps2fs_write_inode(struct inode *inode)
-{
-    ps2fs_update_inode(inode, 0);
-}
-#else
-void ps2fs_write_inode(struct inode *inode, int wait)
-{
-    ps2fs_update_inode(inode, wait);
-}
-#endif
-
-/*************************************************************************/
-
-/* iput() callback; called just before an inode's usage count is
- * decremented.  If this is the last user of the inode, we free the raw
- * inode memory.
- */
-
-void ps2fs_put_inode(struct inode *inode)
-{
-    if (atomic_read(&inode->i_count) == 1) {
-	struct ps2fs_inode *ps2inode = PS2FS_INODE(inode)->rawinode;
-	if (ps2inode) {
-dprintk("--- kfreeing 0x%08lX\n",inode->i_ino);
-	    kfree(ps2inode);
-	} else {
-	    ps2fs_error(inode->i_sb, "ps2fs_put_inode",
-			"inode 0x%08lX: rawinode is NULL", inode->i_ino);
-	}
-    }
-}
-
-/*************************************************************************/
-
-/* Callback for deleting an inode (i.e. i_nlink zero at last iput()). */
-
-void ps2fs_delete_inode(struct inode *inode)
-{
-    inode->i_size = 0;
-    ps2fs_truncate(inode);
-    if (free_block(inode->i_sb, inode->i_ino) < 0) {
-	ps2fs_error(inode->i_sb, "ps2fs_delete_inode",
-		    "cannot free inode block 0x%08lX", inode->i_ino);
-    }
-    clear_inode(inode);  /* must be called by delete_inode() callback */
-}
-
-/*************************************************************************/
-/*************************************************************************/
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-
-/* Read in a page of a file. */
-static int ps2fs_readpage(struct file *file, struct page *page)
-{
-    return block_read_full_page(page, ps2fs_get_block);
-}
-
-/* Write out a page of a file. */
-static int ps2fs_writepage(struct page *page)
-{
-    return block_write_full_page(page, ps2fs_get_block);
-}
-
-/* Prepare to write a page. */
-static int ps2fs_prepare_write(struct file *file, struct page *page,
-			       unsigned int from, unsigned int to)
-{
-    return block_prepare_write(page, from, to, ps2fs_get_block);
-}
-
-#else  /* kernel < 2.4.0 */
-
-/* Return the sector number for the given inode and block. */
-int ps2fs_bmap(struct inode *inode, int iblock)
-{
-    struct buffer_head result;
-    if (ps2fs_get_block(inode, iblock, &result, 0) < 0)
-	return 0;
-    return result.b_blocknr;
-}
-
-/* Write to a file. */
-static int ps2fs_file_write(struct file *file, const char *buf, size_t count,
-			    loff_t *ppos)
-{
-    struct inode *inode = file->f_dentry->d_inode;
-    loff_t pos;
-    struct super_block *sb = inode->i_sb;
-    int blocksize = 1 << (sb->s_blocksize_bits + PS2FS_SB(sb)->block_shift);
-    int block, lastblock;
-    int error = -EIO;
-    int written = 0;
-
-    if (!count)
-	return 0;
-    if (sb->s_flags & MS_RDONLY)
-	return -EROFS;
-    pos = *ppos;
-    if (pos > (__u32)(pos+count)) {
-	count = ~pos;	/* 0xFFFFFFFF-pos */
-	if (!count)
-	    return -EFBIG;
-    }
-    lastblock = -1;
-    while (count > 0) {
-	struct buffer_head *bh;
-	struct buffer_head tmpbh;  /* to receive block numbers */
-	int to_write, secofs;
-
-	block = pos / blocksize;
-	if (block != lastblock) {
-	    error = ps2fs_get_block(inode, block, &tmpbh, 0);
-	    if (error)
-		error = ps2fs_get_block(inode, block, &tmpbh, 1);
-	    if (error)
-		goto ioerr;
-	    lastblock = block;
-	}
-	tmpbh.b_blocknr += (pos & (blocksize-1)) >> sb->s_blocksize_bits;
-	bh = bread(tmpbh.b_dev, tmpbh.b_blocknr, sb->s_blocksize);
-	if (!bh) {
-	    error = -EIO;
-	    goto ioerr;
-	}
-	secofs = pos & (sb->s_blocksize-1);
-	to_write = sb->s_blocksize-secofs;
-	if (to_write > count)
-	    to_write = count;
-	to_write -= copy_from_user(bh->b_data+secofs, buf, to_write);
-	if (!to_write) {
-	    /* Couldn't copy any data from userspace */
-	    brelse(bh);
-	    error = -EFAULT;
-	    goto ioerr;
-	}
-	update_vm_cache(inode, pos, bh->b_data+secofs, to_write);
-	mark_buffer_uptodate(bh, 1);
-	mark_buffer_dirty(bh);
-	if (file->f_flags & O_SYNC) {
-	    ll_rw_block(WRITE, 1, &bh);
-	    wait_on_buffer(bh);
-	    if (!buffer_uptodate(bh)) {
-		brelse(bh);
-		error = -EIO;
-		goto ioerr;
-	    }
-	}
-	brelse(bh);
-	written += to_write;
-	pos += to_write;
-	buf += to_write;
-	count -= to_write;
-    }
-    *ppos = pos;
-    if (pos > inode->i_size)  /* not currently possible */
-	inode->i_size = pos;
-    inode->i_ctime = inode->i_mtime = CURRENT_TIME;
-    mark_inode_dirty(inode);
-    if (file->f_flags & O_SYNC)
-	ps2fs_update_inode(inode, 1);
-    return written;
-
-  ioerr:
-    return written ? written : error;
-}
-
-#endif
-
-/*************************************************************************/
-
-/* Truncate a file to the size given in inode->i_size. */
-
-void ps2fs_truncate(struct inode *inode)
-{
-    struct ps2fs_inode *ps2inode = PS2FS_INODE(inode)->rawinode;
-    struct super_block *sb = inode->i_sb;
-    __u32 blocksize = sb->s_blocksize << PS2FS_SB(sb)->block_shift;
-    __u32 blocks = (inode->i_size + (blocksize-1))
-		   >> (sb->s_blocksize_bits + PS2FS_SB(sb)->block_shift);
-    __u32 i, j;
-
-    for (i = 0; i < 113; i++) {  /* FIXME: 113 -> named constant */
-	__u32 first = le32_to_cpu(ps2inode->data[i].number);
-	__u32 count = le16_to_cpu(ps2inode->data[i].count);
-	if (!count)
-	    break;
-	if (blocks < count) {
-	    /* Free some or all blocks */
-	    /* FIXME: fix free_block() to free multiple blocks at once */
-	    for (j = blocks; j < count; j++)
-		free_block(sb, first+j);
-	    if (blocks) {
-		ps2inode->data[i].count = cpu_to_le16(blocks);
-	    } else {
-		ps2inode->data[i].number = 0;  /* 0 is 0 in any endianness */
-		*((__u32 *)(&ps2inode->data[i].number)+1) = 0;
-	    }
-	    blocks = 0;
-	} else {
-	    blocks -= count;
-	}
-    }
-}
-
-/*************************************************************************/
-/*************************************************************************/
-
-/* Find the hardware sector number corresponding to the given block of the
- * given file (inode), and set up `bh_result' accordingly.  Returns 0 on
- * success, negative on error.
- */
-
-int ps2fs_get_block(struct inode *inode, long iblock,
-		    struct buffer_head *bh_result, int create)
-{
-    struct ps2fs_inode *ps2inode = PS2FS_INODE(inode)->rawinode;
-    int part = PS2FS_SUBPART(inode->i_ino);
-    int i;
-
-dprintk("getblock: ino=0x%08lX block=%ld create=%d\n",inode->i_ino,iblock,create);
-    if (iblock < 0)
-	return -EINVAL;
-
-    for (i = 0; i < 113; i++) {  /* FIXME: 113 -> named constant */
-	__u32 count = le16_to_cpu(ps2inode->data[i].count);
-dprintk("   %d: %08X/%u\n",i,le32_to_cpu(ps2inode->data[i].number),count);
-	if (!count)
-	    break;
-	count <<= PS2FS_SB(inode->i_sb)->block_shift;
-	if (iblock < count) {
-	    /* Found it! */
-	    bh_result->b_dev = inode->i_dev;
-	    bh_result->b_blocknr = PS2FS_SB(inode->i_sb)->first_sector[part]
-				 + (le32_to_cpu(ps2inode->data[i].number)
-				    << PS2FS_SB(inode->i_sb)->block_shift)
-				 + iblock;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-	    bh_result->b_state |= 1UL << BH_Mapped;
-#endif
-dprintk("   found! %08lX\n",bh_result->b_blocknr);
-	    return 0;
-	}
-	/* Not found, try next fragment */
-	iblock -= count;
-    }
-
-    /* Block does not exist */
-    if (create) {
-	long block;
-	long nextblock;  /* Block after last block in file */
-
-	if (iblock != 0) {
-	    /* We don't support holes in files */
-	    printk("ps2fs: holes in files not supported\n");
-	    return -EIO;
-	}
-	/* FIXME: is 0x8000-0xFFFF okay in count field? */
-	if (i > 0 && le16_to_cpu(ps2inode->data[i-1].count) < 0x7FFF) {
-	    nextblock = le32_to_cpu(ps2inode->data[i-1].number)
-		      + le16_to_cpu(ps2inode->data[i-1].count);
-	} else {
-	    nextblock = -1;  /* impossible value */
-	}
-	if (i == 113) {
-	    /* Inode's block table is full.  If we can get the next block
-	     * after the last entry, take it. */
-	    block = get_new_block(inode->i_sb,
-				  PS2FS_MAKE_INUM(nextblock,part));
-	} else {
-	    /* Any block will do. */
-	    block = get_new_block(inode->i_sb, 0);
-	}
-	if (block < 0)
-	    return block;
-	if (i > 0 && block == nextblock) {
-	    ps2inode->data[i-1].count =
-		cpu_to_le16(le16_to_cpu(ps2inode->data[i-1].count) + 1);
-	} else {
-	    ps2inode->data[i].number = cpu_to_le32(block);
-	    ps2inode->data[i].count = cpu_to_le16(1);
-	}
-	inode->i_ctime = CURRENT_TIME;  /* inode was changed */
-	bh_result->b_dev = inode->i_dev;
-	bh_result->b_blocknr = PS2FS_SB(inode->i_sb)->first_sector[part]
-			     + (block << PS2FS_SB(inode->i_sb)->block_shift);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-	bh_result->b_state |= (1UL << BH_New);
-#endif
-dprintk("   added! %08lX\n",bh_result->b_blocknr); 
-	return 0;
-    }
-
-    /* !create */
-    return -EIO;
-}
-
-/*************************************************************************/
+struct inode_operations ps2fs_symlink_iops = {
+    readlink:		ps2fs_readlink,
+    follow_link:	ps2fs_follow_link,
+    setattr:		ps2fs_setattr,
+};

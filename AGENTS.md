@@ -91,7 +91,7 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 - Reads the PlayStation 2 APA (Authentic Partition Architecture) partition table format used on PS2 HDDs.
 
 ### E. Additional Filesystems
-- `fs/ps2fs/`: APA/PFS driver (Andrew Church, ported by Mega Man). PSBBN keeps its own data on these partitions, so mounts are **read-only unless `-o unsafe_write`** is given (experimental file writes). Creating or removing directory entries is always refused (`PS2FS_DIR_WRITE` is 0) because it is known to destroy directory data.
+- `fs/ps2fs/`: APA/PFS driver, read-write since the journal/segment rewrite. Mounts are **read-only unless `-o unsafe_write`** is given. The format and Sony's modification rules are in `Documentation/filesystems/ps2fs-format.md`; keep the driver to them (journaled metadata, exact bitmap, dentry type bits, CLOSED attr). ps2sdk is AFL-2.0: use it as a test oracle only, never copy its code.
 - `fs/exfat/`: exFAT driver built on FatFs R0.16 by ChaN plus Linux 2.4 VFS glue. Local FatFs changes are listed in `fs/exfat/README`.
 - `fs/mmcefs/`: Files on the SD card of an MMCE (SD2PSX, MemCard PRO2) through the IOP: a fileXio RPC client for `mmce0:`/`mmce1:`.
   - On first mount it loads `iomanX.irx`, `fileXio.irx` and `mmceman.irx` (shipped in `fs/mmcefs/irx/`) with `arch/mips/ps2/loadfile.c` (IOP LOADFILE RPC).
@@ -104,6 +104,7 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 
 0. **Testing**:
    - `tests/exfat-qemu/run.sh` builds a vanilla 2.4.17 i386 kernel with `fs/exfat` and runs a test suite in QEMU, with `fsck.exfat` after each phase. Run it after any change to `fs/exfat`; CI runs it too.
+   - `tests/ps2fs-qemu/run.sh` does the same for `fs/ps2fs`, with pfsshell and ps2sdk's PFS fsck as the oracle. Run it after any change to `fs/ps2fs`.
    - Code that talks to the IOP cannot be emulated; say so when it is untested on hardware.
    - SIF RPC calls must retry on both `-SIF_RPCE_SENDP` (Sony SBIOS, used by PSBBN) and `-E_SIF_PKT_ALLOC` (kernelloader TGE).
 

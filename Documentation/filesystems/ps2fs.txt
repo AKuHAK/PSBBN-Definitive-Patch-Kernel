@@ -1,0 +1,61 @@
+PlayStation 2 HDD filesystem (PFS)
+==================================
+
+PFS is the filesystem of PlayStation 2 hard disks: PSBBN, HDD OSD and
+games keep their data in PFS partitions of the APA partition table
+(__system, __sysconf, __common, ...).  The driver reads and, when asked,
+writes them.  The on-disk format and the rules it follows are described in
+ps2fs-format.md next to this file.
+
+Usage
+-----
+
+  mount -t ps2fs -o partition=__common /dev/hda /mnt/common
+  mount -t ps2fs -o partition=__common,unsafe_write /dev/hda /mnt/common
+
+The device is the whole disk; partition= names the APA partition (its
+sub-partitions are found automatically).  Without partition= the first
+partition of the device is used, which suits loop devices that start at a
+partition.
+
+Mount options
+-------------
+
+  partition=ID    APA partition to mount.
+  unsafe_write    Allow writing.  Without it the mount is read-only, even
+                  without "ro".  Can also be given to "mount -o remount,rw".
+  tzoffset=n      Time zone of the timestamps on disk, in minutes east of
+                  UTC.  Default 540: the PS2 clock runs on Japan time.
+  uid=n, gid=n    Owner shown for all files (default 0).  PFS stores no
+                  owners; chown is refused.
+
+Writing
+-------
+
+With unsafe_write everything works: creating, writing, truncating and
+deleting files, mkdir, rmdir, rename (also across directories and over
+existing entries), symbolic links (targets up to 903 bytes), chmod and
+utime.  Files may be larger than 4 GB.  Changes follow Sony's driver:
+
+  - Metadata goes through PFS's own journal, written the way Sony writes
+    it, so after a crash or power loss PSBBN, fsck and this driver replay
+    it.  A pending journal is replayed at a read-write mount (a read-only
+    mount only warns).
+  - File data is written before the metadata that refers to it.  Metadata
+    reaches the disk within a few seconds, at sync, fsync, the last close
+    of a written file, and at umount.
+  - A volume whose superblock carries Sony's write-error flag is mounted
+    read-only; check it on the PS2 (or with pfsshell's fsck) first.  On a
+    metadata I/O error the driver stops writing and sets that flag.
+  - Timestamps: like Sony's driver, closing a file that was open for
+    writing sets all three times to now.  Access times are not updated.
+  - Permissions: PFS keeps them but Sony ignores all but execute, so
+    files and directories are always shown readable.
+  - Names are UTF-8 on disk and EUC-JP towards Linux (as in the original
+    driver).  Two-byte names starting with "." are refused, because
+    Sony's fsck would take them for "..".  Hard links, device nodes and
+    other special files cannot be created.
+
+Writing is still new: keep a backup of partitions that hold data you care
+about.  tests/ps2fs-qemu checks every change with ps2sdk's pfs (through
+pfsshell) and fsck, but not yet on a real PS2.

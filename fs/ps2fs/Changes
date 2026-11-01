@@ -1,5 +1,10 @@
 Version 0
 ---------
+2026/11/01 1.0	Read-write rewrite following Sony's format rules: PFS journal
+		    (commit and replay), exact zone bitmap, SEGI zone chains,
+		    create/mkdir/symlink/unlink/rmdir/rename, truncate, chmod,
+		    utime, files over 4 GB, write-error flag; tested against
+		    pfsshell and ps2sdk's fsck (PSBBN Definitive Patch kernel).
 2026/11/01	Mount read-only unless -o unsafe_write is given; refuse
 		    create/unlink/mkdir/rmdir (known to destroy directory data);
 		    allow remount; never loop on a directory entry with a
