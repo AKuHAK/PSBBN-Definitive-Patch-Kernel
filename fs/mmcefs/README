@@ -74,6 +74,9 @@ Hardware findings (2026-11-01)
     to the card failed at the SBIOS level (Open 145, GetDir 152, Mkdir:
     "sbios_rpc: RPC failed ... result=-1", -SIF_RPCE_GETP) while GetInfo
     worked, also right after a reboot.  Not investigated further.
+  - Done since: ps2_load_module() loads by IOP path (function 0), and
+    mmcefs falls back to irx_iop (default mc0:/LINUXIRX) when function 6
+    is missing.  Not yet tested on hardware.
   - Other ways out: load the three modules before Linux starts (boot
     loader / IOP reset image) and mount with noload; or find another IOP
     device for the files.

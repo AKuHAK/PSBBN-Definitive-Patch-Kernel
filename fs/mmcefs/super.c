@@ -29,6 +29,9 @@ extern struct timezone sys_tz;
 static char *irx_dir = "/lib/modules/irx";
 MODULE_PARM(irx_dir, "s");
 MODULE_PARM_DESC(irx_dir, "directory holding iomanX.irx, fileXio.irx and mmceman.irx");
+static char *irx_iop = "mc0:/LINUXIRX";
+MODULE_PARM(irx_iop, "s");
+MODULE_PARM_DESC(irx_iop, "IOP path of the same files, for IOPs that cannot load from memory");
 
 static DECLARE_MUTEX(mmcefs_load_sem);
 
@@ -182,23 +185,18 @@ static struct super_operations mmcefs_sops = {
 };
 
 /* Read @name from irx_dir and start it on the IOP */
-static int mmcefs_load_irx(const char *name)
+/* Send irx_dir/name to the IOP from EE memory */
+static int mmcefs_load_irx_file(const char *name, char *path, int *modres)
 {
-	char path[256];
 	struct file *f;
 	char *image;
 	loff_t size;
-	int rv, modres = -1;
+	int rv;
 
-	if (strlen(irx_dir) + strlen(name) + 2 > sizeof(path))
-		return -ENAMETOOLONG;
 	sprintf(path, "%s/%s", irx_dir, name);
 	f = filp_open(path, O_RDONLY, 0);
-	if (IS_ERR(f)) {
-		printk(KERN_ERR "mmcefs: cannot open %s (%ld)\n", path,
-		       PTR_ERR(f));
+	if (IS_ERR(f))
 		return PTR_ERR(f);
-	}
 	size = f->f_dentry->d_inode->i_size;
 	if (size <= 0 || size > 1024 * 1024) {
 		filp_close(f, NULL);
@@ -212,10 +210,39 @@ static int mmcefs_load_irx(const char *name)
 	rv = kernel_read(f, 0, image, size);
 	filp_close(f, NULL);
 	if (rv == size)
-		rv = ps2_load_module_buffer(image, size, NULL, 0, &modres);
+		rv = ps2_load_module_buffer(image, size, NULL, 0, modres);
 	else if (rv >= 0)
 		rv = -EIO;
 	vfree(image);
+	return rv;
+}
+
+/*
+ * Load an IOP module: from irx_dir through EE memory, or, once the IOP has
+ * refused that (PSBBN's LOADFILE cannot load from memory), from irx_iop,
+ * a directory the IOP reads itself (by default on the memory card).
+ */
+static int mmcefs_load_irx(const char *name)
+{
+	static int iop_only;
+	char path[256];
+	int rv = -ENOSYS, modres = -1;
+
+	if (strlen(irx_dir) + strlen(name) + 2 > sizeof(path) ||
+	    strlen(irx_iop) + strlen(name) + 2 > sizeof(path))
+		return -ENAMETOOLONG;
+	if (!iop_only) {
+		rv = mmcefs_load_irx_file(name, path, &modres);
+		if (rv == -ENOSYS) {
+			printk(KERN_INFO "mmcefs: the IOP cannot load modules "
+			       "from memory; loading them from %s\n", irx_iop);
+			iop_only = 1;
+		}
+	}
+	if (iop_only) {
+		sprintf(path, "%s/%s", irx_iop, name);
+		rv = ps2_load_module(path, NULL, 0, &modres);
+	}
 	if (rv < 0)
 		printk(KERN_ERR "mmcefs: loading %s failed (%d)\n", path, rv);
 	else if (modres == 1)

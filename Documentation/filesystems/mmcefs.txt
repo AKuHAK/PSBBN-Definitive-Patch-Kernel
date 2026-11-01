@@ -38,9 +38,14 @@ Mount options
                   Octal permission masks (default: the umask).
   noload          Do not load IOP modules; expect them to be running.
 
-Module parameter:
+Module parameters:
 
   irx_dir=/path   Directory with the .irx files (default /lib/modules/irx).
+  irx_iop=path    The same files as the IOP sees them (default
+                  mc0:/LINUXIRX).  Used when the IOP cannot load modules
+                  from memory, which is the case under PSBBN: copy the
+                  three files to mc0:/LINUXIRX/ on the memory card in slot
+                  1 (for example with wLaunchELF) once.
 
 Limitations
 -----------
