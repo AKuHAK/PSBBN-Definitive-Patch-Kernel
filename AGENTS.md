@@ -77,6 +77,8 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 - `rm.c`: PS2 DVD Remote Control driver.
 - Memory card (`mc.c`, `mcdir.c`, `mcfile.c`, `mcfs/`): the kernel talks to the card through the PS2 Linux SBIOS calls `SBR_MC_OPEN`..`SBR_MC_GETENTSPACE` (145-159).  Under PSBBN these fail with `-SIF_RPCE_GETP` as soon as the IOP has data to return (any non-empty directory, opening a file); only GetInfo and lookups of missing names work.  PSBBN's own `libmc` (statically linked into `/opt0/bn/bn`) uses `SBR_MC_CALL` (ioctl `PS2MC_CALL`): a pass-through RPC to the IOP memory card server with `{u32 1, fno, send, ssize, recv, rsize}` and KSEG0 addresses; GetDir is function 13 with a 1044-byte request `{port, slot, mode, maxent, table, name[1024]}` and a 4-byte result.  A read-only probe through `SBR_MC_CALL` lists the card correctly.  Passing physical addresses makes the SBIOS oops with the card lock held.  Never write to a card without the owner's consent: it may be the boot card.
 
+- IOP environment under PSBBN: Sony's boot loader (`__system:/osdboot.elf` = `p2lboot/BB.ELF`) reboots the IOP with its packed image "234" before starting the kernel. Linux cannot load IOP modules later (no LOADFILE function 6; `mc0:` paths fail with -201), so modules Linux needs must be added to that image: `tools/osdboot-mmce/` (format, layout, builder, emulator-based check).
+
 ### C. Hard Disk & ATA Subsystem (`drivers/ide/`)
 - `ps2ide.c`: PS2 IDE host controller registration and DEV9 interface setup.
   - Contains DEV9 reset logic required to initialize GameStar SATA network/HDD adapter clones.
