@@ -1,0 +1,95 @@
+mmcefs - status, testing and notes
+==================================
+
+User documentation (mount options, limitations, messages):
+Documentation/filesystems/mmcefs.txt
+
+Status
+------
+
+  - Builds with the PS2 toolchain (gcc 2.95.2) as a module, without
+    warnings.  Every symbol it imports is exported by the kernel.
+  - NOT YET TESTED ON A REAL PS2.  The fileXio wire protocol was written
+    from the ps2sdk sources (ee/rpc/filexio, iop/fs/filexio) and the IOP
+    module loader from ps2sdk ee/kernel/src/loadfile.c, but no MMCE + PS2
+    Linux emulator exists, so the first run on hardware is the real test.
+  - Target hardware: SD2PSX in a memory card slot, PSBBN Definitive Patch
+    kernel.  The IOP modules cannot be preloaded in that setup, so mmcefs
+    loads them itself.
+
+Pieces
+------
+
+  arch/mips/ps2/loadfile.c   ps2_load_module_buffer(): copies an IRX to the
+                             IOP heap (SIF DMA) and starts it through the
+                             LOADFILE RPC service (0x80000006, function 6).
+  fs/mmcefs/fxio.c           fileXio RPC client (service 0x0b0b0b00).
+  fs/mmcefs/super.c          mount, options, IRX loading, inodes.
+  fs/mmcefs/namei.c          lookup/create/mkdir/unlink/rmdir/rename/readdir.
+  fs/mmcefs/file.c           page cache I/O over one IOP fd per inode.
+  fs/mmcefs/irx/             iomanX.irx, fileXio.irx (ps2sdk v2.0.0),
+                             mmceman.irx (ps2-mmce release), with licenses.
+
+Testing on the PS2
+------------------
+
+Build the kernel and modules as in the top-level README.md (the IRX files
+are copied to rootfs/lib/modules/irx), install them, boot, then:
+
+  dmesg -c > /dev/null
+  insmod mmcefs                  # or modprobe mmcefs
+  mkdir -p /mnt/mmce
+  mount -t mmcefs -o slot=0 none /mnt/mmce
+  dmesg                          # expect "mmcefs: loaded ..." x3
+  ls -la /mnt/mmce
+
+Then, step by step (stop at the first failure and keep dmesg):
+
+  1. cat a small text file from the card; md5sum a large one and compare
+     with the same file read on a PC.
+  2. cp a file >8 KB to the card, sync, umount, mount again, md5sum it.
+  3. mkdir /mnt/mmce/test; touch, echo >>, rm, rmdir inside it.
+  4. ls a directory with many files (e.g. the card's MemoryCards folder).
+  5. umount, mount again with slot=1 if a second MMCE is present.
+  6. After everything, check the SD card on a PC (chkdsk/fsck).
+
+Things to report back if it fails: full dmesg, the step, the exact error.
+
+Known risks (check these first)
+-------------------------------
+
+  - "LOADFILE RPC service not available": PSBBN's IOP runtime has no
+    LOADFILE server.  Then the modules have to be loaded before Linux
+    starts (and mount with -o noload), or another loading path is needed.
+  - "loading ... failed" / "did not stay resident": IOP module load error
+    or the module refused to start.  For mmceman this usually means it
+    could not hook sio2man (it needs sio2man >= 1.2; PSBBN's version is
+    unknown).
+  - "fileXio RPC service not available": fileXio.irx did not start
+    (iomanX missing or failed).
+  - "no mmce0: device": mmceman is not running or no MMCE answered in
+    that slot.
+  - Hangs or wrong data: suspect the DMA path in fxio.c - physical
+    addresses (virt_to_phys) and dma_cache_wback_inv/dma_cache_inv around
+    each transfer, and the "rests" handling in fx_read().
+
+Notes for agents
+----------------
+
+  - Locking: fx_lock() serialises all RPCs, guards the shared DMA buffers
+    and the per-inode IOP fds, and keeps seek+read/write atomic.  It nests
+    inside the page lock and i_sem.  Never call filldir(), copy_*_user()
+    or allocate with __GFP_FS while holding it.
+  - Everything the IOP DMAs into or out of (and the RPC client data the
+    SBIOS updates) must be in KSEG0 memory from the page allocator: a
+    module's static data is in vmalloc space and virt_to_phys() is wrong
+    there.  See struct fx_bufs in fxio.c.
+  - iomanX returns newlib errno numbers; fx_errno() maps the ones that
+    differ from Linux (ENOTEMPTY 90, ENAMETOOLONG 91, ENOTSUP 134, ...).
+  - mmceman has no rename, chstat (times/modes) or sync; mmcefs_rename()
+    removes an existing target only after the device answered EEXIST, so
+    an unsupported rename never deletes data.
+  - Do not reintroduce a block device for the SD card: the MMCE protocol
+    has no raw sector access (only file commands, see docs in
+    github.com/ps2-mmce/mmceman).
+  - When updating the IRX files, update the sha256 list in irx/README.

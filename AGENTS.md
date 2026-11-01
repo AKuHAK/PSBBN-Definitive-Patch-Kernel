@@ -87,6 +87,13 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 ### D. Partition Table Format (`fs/partitions/ps2.c`)
 - Reads the PlayStation 2 APA (Authentic Partition Architecture) partition table format used on PS2 HDDs.
 
+### E. Additional Filesystems
+- `fs/exfat/`: exFAT driver built on FatFs R0.16 by ChaN plus Linux 2.4 VFS glue. Local FatFs changes are listed in `fs/exfat/README`.
+- `fs/mmcefs/`: Files on the SD card of an MMCE (SD2PSX, MemCard PRO2) through the IOP: a fileXio RPC client for `mmce0:`/`mmce1:`.
+  - On first mount it loads `iomanX.irx`, `fileXio.irx` and `mmceman.irx` (shipped in `fs/mmcefs/irx/`) with `arch/mips/ps2/loadfile.c` (IOP LOADFILE RPC).
+  - Buffers the IOP reaches by DMA must come from the page allocator, since module data lives in vmalloc space.
+  - Not yet tested on real hardware; status, test plan and pitfalls: `fs/mmcefs/README`.
+
 ---
 
 ## 5. Guidelines for Future AI Agents

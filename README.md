@@ -23,6 +23,8 @@ make dep
 make -j"$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2)" vmlinux
 make -j"$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2)" modules
 make modules_install INSTALL_MOD_PATH=rootfs
+mkdir -p rootfs/lib/modules/irx
+cp fs/mmcefs/irx/*.irx rootfs/lib/modules/irx/
 mkdir -p rootfs/boot
 cp vmlinux rootfs/boot/vmlinux-2.4.17_mvl21
 cp System.map rootfs/boot/System.map-2.4.17_mvl21

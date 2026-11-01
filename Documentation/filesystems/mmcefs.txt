@@ -1,0 +1,73 @@
+mmcefs - SD card of an MMCE memory card emulator
+================================================
+
+mmcefs gives Linux access to the files on the SD card of a Multipurpose
+Memory Card Emulator (SD2PSX, MemCard PRO2, PicoMemcard+, ...) plugged into
+a memory card slot.
+
+How it works
+------------
+
+The memory card slots are on the IOP's SIO2 bus, which Linux on the EE
+cannot drive.  On the IOP, three modules do the work:
+
+  iomanX.irx    file manager                         (ps2sdk)
+  fileXio.irx   RPC server giving the EE file access (ps2sdk)
+  mmceman.irx   MMCE protocol; devices mmce0:, mmce1: (ps2-mmce)
+
+mmcefs is a fileXio client.  On the first mount it loads the modules that
+are missing from /lib/modules/irx through the IOP's LOADFILE service, so
+they need not be loaded before Linux starts.  Copies are in
+fs/mmcefs/irx/.
+
+Usage
+-----
+
+  mkdir -p /lib/modules/irx
+  cp iomanX.irx fileXio.irx mmceman.irx /lib/modules/irx/
+  insmod mmcefs
+  mkdir -p /mnt/mmce
+  mount -t mmcefs -o slot=0 none /mnt/mmce
+
+Mount options
+-------------
+
+  slot=0|1        Memory card slot 1 (slot=0, default) or slot 2 (slot=1).
+  uid=, gid=      Owner of all files (default: the user who mounts).
+  umask=, fmask=, dmask=
+                  Octal permission masks (default: the umask).
+  noload          Do not load IOP modules; expect them to be running.
+
+Module parameter:
+
+  irx_dir=/path   Directory with the .irx files (default /lib/modules/irx).
+
+Limitations
+-----------
+
+These come from the MMCE protocol and mmceman, not from Linux:
+
+- rename is not supported (EOPNOTSUPP).  Copy and delete instead.
+- Truncating is limited to emptying a file or making it longer.
+- Owners, permissions and timestamps cannot be changed on the card; such
+  changes are accepted but only kept in memory.
+- Free space is not reported (df shows 0).
+- File names are passed to the card unchanged (UTF-8) and compared
+  without regard to ASCII case, as on FAT; \ : * ? " < > | and control
+  characters cannot be used.
+- Throughput is limited by the memory card port (SIO2).
+- mmceman hooks the IOP's sio2man module.  If the sio2man in use is
+  older than version 1.2, mmceman cannot start and the mount fails with
+  "no mmce0: device".
+
+Messages
+--------
+
+  "LOADFILE RPC service not available"  the IOP cannot load modules at run
+                                         time; load the three modules
+                                         before Linux starts and mount
+                                         with noload.
+  "cannot open /lib/modules/irx/..."     the .irx files are missing.
+  "fileXio RPC service not available"    fileXio.irx did not start.
+  "no mmce0: device"                     mmceman.irx did not start or no
+                                         MMCE answers in that slot.

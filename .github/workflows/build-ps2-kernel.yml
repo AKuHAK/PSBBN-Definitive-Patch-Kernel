@@ -61,6 +61,8 @@ jobs:
               echo "Building modules (optional)..."
               make -j"$JOBS" modules || true
               make modules_install INSTALL_MOD_PATH=/work/rootfs
+              mkdir -p /work/rootfs/lib/modules/irx
+              cp fs/mmcefs/irx/*.irx /work/rootfs/lib/modules/irx/
               tar cvf kernel-modules-2.4.17.tar -C /work/rootfs/lib/modules .
               gzip kernel-modules-2.4.17.tar
 

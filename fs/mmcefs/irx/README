@@ -1,0 +1,21 @@
+IOP modules for mmcefs
+======================
+
+mmcefs loads these into the IOP on its first mount if they are not already
+running.  Install them on the PS2 root filesystem:
+
+  mkdir -p /lib/modules/irx
+  cp iomanX.irx fileXio.irx mmceman.irx /lib/modules/irx/
+
+(or point the module parameter irx_dir= at another directory).
+
+  file          source                                         sha256
+  iomanX.irx    ps2sdk, ps2dev release v2.0.0 (2026-05-17)     c7efcdaf870d765cb0a6c126f72dc4c57533cbca3a44d208073cf3b30699822d
+  fileXio.irx   ps2sdk, ps2dev release v2.0.0 (2026-05-17)     d158651ca5fcf623e12913a27d0ab1b7f94b03c9e700e7bcc223cf898a7e6711
+  mmceman.irx   github.com/ps2-mmce/mmceman release "latest"   0e96a0dec8e6596220499fc65b76c864208d8f51ec9f8cedbbe78cd10b4ca4a4
+                (2026-08-01)
+
+iomanX.irx and fileXio.irx are part of ps2sdk (https://github.com/ps2dev/ps2sdk),
+licensed under the Academic Free License 2.0 (LICENSE.ps2sdk).
+mmceman.irx is by the MMCE authors (https://github.com/ps2-mmce/mmceman),
+licensed under the MIT license (LICENSE.mmceman).
