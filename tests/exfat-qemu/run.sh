@@ -39,11 +39,13 @@ run_tools sh -c "cd /work && { [ -f $KERNEL ] || curl -fsSLO https://cdn.kernel.
 run_tools sh /repo/tests/exfat-qemu/prepare-kernel.sh "/work/$KERNEL" /repo /work
 
 echo "== build (gcc 2.95, i386)"
-run_woody sh -c 'cd linux-2.4.17 && (yes "" | make oldconfig >/dev/null 2>&1);
-	grep -q "^CONFIG_EXFAT_FS=y" .config || { echo "exFAT not configured"; exit 1; }
-	make dep >/dev/null 2>&1 &&
+run_woody sh -c 'cd linux-2.4.17 || exit 1
+	fail() { echo "$1 failed:"; tail -40 "../$2"; exit 1; }
+	yes "" | make oldconfig >../oldconfig.log 2>&1
+	grep -q "^CONFIG_EXFAT_FS=y" .config || fail "exFAT configuration" oldconfig.log
+	make dep >../dep.log 2>&1 || fail "make dep" dep.log
 	make -j$(grep -c ^processor /proc/cpuinfo) bzImage >../build.log 2>&1 ||
-		{ tail -40 ../build.log; exit 1; }
+		fail "make bzImage" build.log
 	grep -E "^(super|namei|file|misc)\.c:" ../build.log || true
 	cd .. && gcc -static -O2 -Wall -o exfattest /repo/tests/exfat-qemu/exfattest.c'
 
