@@ -13,7 +13,11 @@ struct ps2fs_sb_info {
     __u32 n_subparts;	/* Number of subparts */
     __u32 first_sector[PS2FS_MAX_SUBPARTS];
     __u32 size[PS2FS_MAX_SUBPARTS];	/* In hardware blocks */
+    __u32 flags;	/* PS2FS_MOUNT_* */
 };
+
+/* Writing to files was allowed with the unsafe_write mount option */
+#define PS2FS_MOUNT_UNSAFE_WRITE	1
 
 #define PS2FS_SB(sb)	((struct ps2fs_sb_info *)(&((sb)->u.generic_sbp)))
 

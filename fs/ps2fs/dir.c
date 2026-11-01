@@ -171,6 +171,8 @@ static int ps2fs_create(struct inode *dir, struct dentry *dentry, int mode)
     struct inode *inode;
     int err;
 
+    if (!PS2FS_DIR_WRITE)
+	return -EROFS;
     err = translate_to_unicode(dentry, unicode_buf, sizeof(unicode_buf));
     if (err < 0)
 	return err;
@@ -205,6 +207,8 @@ static int ps2fs_unlink(struct inode *dir, struct dentry *dentry)
     struct inode *inode = dentry->d_inode;
     int err;
 
+    if (!PS2FS_DIR_WRITE)
+	return -EROFS;
     err = translate_to_unicode(dentry, unicode_buf, sizeof(unicode_buf));
     if (!err)
 	err = ps2fs_remove_dirent(dir, unicode_buf);
@@ -226,6 +230,8 @@ static int ps2fs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
     struct ps2fs_dirent *ps2de;
     int err;
 
+    if (!PS2FS_DIR_WRITE)
+	return -EROFS;
     /* Translate name to Unicode */
     err = translate_to_unicode(dentry, unicode_buf, sizeof(unicode_buf));
     if (err < 0)
@@ -308,6 +314,8 @@ static int ps2fs_rmdir(struct inode *dir, struct dentry *dentry)
     struct inode *inode = dentry->d_inode;
     int err;
 
+    if (!PS2FS_DIR_WRITE)
+	return -EROFS;
     err = translate_to_unicode(dentry, unicode_buf, sizeof(unicode_buf));
     if (!err)
 	err = ps2fs_check_dir_empty(inode);

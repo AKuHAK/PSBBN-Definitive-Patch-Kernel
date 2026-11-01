@@ -55,7 +55,7 @@ static struct super_operations ps2fs_sops = {
  */
 
 static int parse_options(char *options, char opt_partition[PS2_PART_IDMAX+2],
-			 int *opt_tzoffset)
+			 int *opt_tzoffset, int *opt_unsafe_write)
 {
     char *s;
 
@@ -90,6 +90,10 @@ static int parse_options(char *options, char opt_partition[PS2_PART_IDMAX+2],
 		printk("ps2fs: tzoffset option requires an integer\n");
 		return 0;
 	    }
+	} else if (strncmp(options, "unsafe_write", 12) == 0 &&
+		   (!options[12] || options[12] == ',')) {
+	    options += 12;
+	    *opt_unsafe_write = 1;
 	} else {
 	    s = strpbrk(options, "=");
 	    if (s)
@@ -124,11 +128,13 @@ struct super_block *ps2fs_read_super(struct super_block *sb, void *data,
     struct ps2fs_sb_info *sbinfo = PS2FS_SB(sb);
     char opt_partition[PS2_PART_IDMAX+2] = "";
     int opt_tzoffset = 0;
+    int opt_unsafe_write = 0;
     int i;
     char *s;
 
     /* Parse options */
-    if (!parse_options((char *)data, opt_partition, &opt_tzoffset))
+    if (!parse_options((char *)data, opt_partition, &opt_tzoffset,
+		       &opt_unsafe_write))
 	return NULL;
 
     /* Get the hardware block size */
@@ -176,6 +182,16 @@ struct super_block *ps2fs_read_super(struct super_block *sb, void *data,
 		      " small", sbinfo->root_inode);
     }
     sbinfo->tzoffset = opt_tzoffset*60;
+
+    /* Writing is experimental and these partitions hold PSBBN's own data
+     * (see README), so mount read-only unless explicitly asked not to. */
+    sbinfo->flags = opt_unsafe_write ? PS2FS_MOUNT_UNSAFE_WRITE : 0;
+    if (!opt_unsafe_write) {
+	sb->s_flags |= MS_RDONLY;
+    } else if (!(sb->s_flags & MS_RDONLY)) {
+	printk(KERN_WARNING "ps2fs: unsafe_write: writing to files is "
+	       "experimental and may corrupt the partition\n");
+    }
 
     /* Free the superblock data */
     brelse(bh);
@@ -256,7 +272,11 @@ static int ps2fs_statfs(struct super_block *sb, struct statfs *sf, int bufsiz)
 
 static int ps2fs_remount_fs(struct super_block *sb, int *flags, char *data)
 {
-    return -ENOSYS;  /*FIXME*/
+    /* Read-write needs the unsafe_write option of the original mount */
+    if (!(*flags & MS_RDONLY)
+	&& !(PS2FS_SB(sb)->flags & PS2FS_MOUNT_UNSAFE_WRITE))
+	return -EROFS;
+    return 0;
 }
 
 /*************************************************************************/

@@ -1,5 +1,9 @@
 Version 0
 ---------
+2026/11/01	Mount read-only unless -o unsafe_write is given; refuse
+		    create/unlink/mkdir/rmdir (known to destroy directory data);
+		    allow remount; never loop on a directory entry with a
+		    corrupted size (PSBBN Definitive Patch kernel).
 2002/12/04 .9	Added support (read-only) for filesystems with multiple
 		    partitions.
 2002/09/04 .8	Added preliminary support for modifiying directories. (broken)

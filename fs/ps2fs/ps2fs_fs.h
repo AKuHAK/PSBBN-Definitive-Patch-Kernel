@@ -21,6 +21,10 @@
  */
 #define PS2FS_MAX_SUBPARTS	16
 
+/* Creating and removing directory entries is known to destroy directory
+ * data (see README), so it is refused; set to 1 only for development. */
+#define PS2FS_DIR_WRITE		0
+
 /* NOTE: if this is not the maximum possible value of the
  * ps2fs_dirent.namelen field, then buffer overflows can occur in dir.c! */
 #define PS2FS_NAME_LEN		255
@@ -85,8 +89,16 @@ struct ps2fs_dirent {
 #define PS2FS_DIRENT_IFREG	0x2000
 #define PS2FS_DIRENT_NAMEMAX	255
 
-#define ps2fs_next_dirent(de) \
-    ((struct ps2fs_dirent *)((char *)(de) + (le16_to_cpu(de->size_flags) & PS2FS_DIRENT_SIZEMASK)))
+/* A corrupted entry size below the header size would never advance and
+ * hang every directory walk, so skip to the next 512-byte sector then. */
+static inline struct ps2fs_dirent *ps2fs_next_dirent(struct ps2fs_dirent *de)
+{
+    unsigned int size = le16_to_cpu(de->size_flags) & PS2FS_DIRENT_SIZEMASK;
+
+    if (size < sizeof(struct ps2fs_dirent))
+	size = 512 - ((unsigned long)de & 511);
+    return (struct ps2fs_dirent *)((char *)de + size);
+}
 
 /* We use (subpart<<24 | inode) as the system "inode number". */
 #define PS2FS_MAKE_INUM(inode,subpart)	((inode) | (subpart)<<24)
