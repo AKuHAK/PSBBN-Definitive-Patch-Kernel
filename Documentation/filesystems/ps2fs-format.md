@@ -601,12 +601,14 @@ chain. That frees the inode zone, every SEGI zone and every extent. Drop all
 cached blocks inside those zones. The inode block itself is **not** rewritten
 on disk: a stale SEGD stays in the freed zone, and nothing marks it deleted.
 
-**REF-BUG (UNSURE whether Sony's binary has it or only the RE).** When the
-ps2sdk routine crosses into a SEGI, it frees the previous descriptor's
-`data[0]` a second time instead of the SEGI's. It then stops, because its
-loop bound is re-read from the SEGI, whose `number_data` field is 0. All
-SEGIs and the extents they hold therefore **leak**, and fsck later repairs the
-leak as a bitmap mismatch. Implement the correct walk.
+**REF-BUG (confirmed in ps2sdk; UNSURE whether Sony's binary has it).**
+When ps2sdk's `pfsBitmapFreeInodeBlocks` crosses into a SEGI, it frees the
+previous descriptor's `data[0]` a second time instead of the SEGI's. It then
+stops, because its loop bound is re-read from the SEGI, whose `number_data`
+field is 0. All SEGIs and the extents they hold therefore **leak**, and fsck
+later repairs the leak as a bitmap mismatch. Implement the correct walk.
+Reproduced with pfsshell on a file written by Linux ps2fs; the fix for
+ps2sdk (and pfsshell) is `tests/ps2fs-qemu/ps2sdk-pfs-free-segi.patch`.
 
 ### 3.10 mode and attr
 

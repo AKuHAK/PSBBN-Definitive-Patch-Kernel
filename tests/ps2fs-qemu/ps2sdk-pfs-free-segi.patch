@@ -1,0 +1,59 @@
+ps2sdk libpfs: free every zone of an inode with indirect segments (SEGI)
+
+pfsBitmapFreeInodeBlocks() (iop/hdd/libpfs/src/bitmap.c) frees all zones
+of a deleted file or directory.  Two mistakes when the zone list continues
+in a SEGI block:
+
+1. `bi` is taken before the switch to the next segment, so at the first
+   entry of each SEGI it frees data[0] of the previous descriptor (the
+   inode's own zone, or the previous SEGI) a second time instead of the
+   SEGI's own zone.
+2. The loop bound re-reads number_data through `clink` after it has moved
+   to the SEGI.  A SEGI has no number_data field (those bytes are part of
+   its data[] array, normally 0), so the loop ends there.
+
+Every SEGI and every extent listed in SEGIs therefore stays marked used in
+the bitmap: rm of such a file leaks zones and fsck reports "bitmap
+unmatch".  Files with more than 113 extents are affected (fragmented
+files; Linux ps2fs creates them as Sony's driver does).  Callers: unlink,
+rmdir and rename-over (pfs_fio.c, dir.c) and fssk.
+
+Present in ps2sdk master f1ca58a (2026-11-01) and in the submodule of
+pfsshell 52b8e83 (ps2sdk 39a8992); libpfs is unchanged between them.
+Whether Sony's own PFS.IRX has the same bug is not known.
+
+Verified with tests/ps2fs-qemu: after phase 2, `rm` of the three
+fragmented files fragA/fragB/fragC through pfsshell gives
+  unpatched: 3219 zones used, NOT CLEAN (bitmap unmatch)
+  patched:   3006 zones used, clean
+Apply in a ps2sdk checkout with: git apply ps2sdk-pfs-free-segi.patch
+
+diff --git a/iop/hdd/libpfs/src/bitmap.c b/iop/hdd/libpfs/src/bitmap.c
+index 6c829e3..db2ecd0 100644
+--- a/iop/hdd/libpfs/src/bitmap.c
++++ b/iop/hdd/libpfs/src/bitmap.c
+@@ -366,13 +366,13 @@ void pfsBitmapShow(pfs_mount_t *pfsMount)
+ void pfsBitmapFreeInodeBlocks(pfs_cache_t *clink)
+ {
+ 	pfs_mount_t *pfsMount=clink->pfsMount;
+-	u32 i;
++	u32 i, number_data=clink->u.inode->number_data;
+ 
+ 	pfsCacheUsedAdd(clink);
+-	for(i=0;i < clink->u.inode->number_data; i++)
++	for(i=0;i < number_data; i++)
+ 	{
+ 		u32 index = pfsFixIndex(i);
+-		pfs_blockinfo_t *bi=&clink->u.inode->data[index];
++		pfs_blockinfo_t *bi;
+ 		int err;
+ 
+ 		if(i!=0) {
+@@ -381,6 +381,7 @@ void pfsBitmapFreeInodeBlocks(pfs_cache_t *clink)
+ 					return;
+ 		}
+ 
++		bi=&clink->u.inode->data[index];
+ 		pfsBitmapFreeBlockSegment(pfsMount, bi);
+ 		pfsCacheMarkClean(pfsMount, (u16)bi->subpart,  bi->number << pfsMount->inode_scale,
+ 			(bi->number + bi->count) << pfsMount->inode_scale);

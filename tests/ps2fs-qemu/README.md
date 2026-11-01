@@ -45,5 +45,8 @@ guest logs are `work/phase<N>.log`, fsck output `work/fsck<N>.log`.
 
 Do not let pfsshell `rm` a file whose zone list has SEGI blocks: ps2sdk's
 pfs then leaks the zones of those blocks and fsck reports a bitmap
-mismatch (a known bug of the reference, see
-`Documentation/filesystems/ps2fs-format.md`, section 3.9).
+mismatch.  This is a bug of ps2sdk (still in master as of 2026-11-01), not
+of the Linux driver; `ps2sdk-pfs-free-segi.patch` here fixes it and
+describes it in detail.  It should go upstream to ps2sdk, and pfsshell
+then needs a submodule update.  Until then the suite pins the unpatched
+pfsshell and avoids that case.
