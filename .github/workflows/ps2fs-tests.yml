@@ -1,0 +1,35 @@
+name: ps2fs (PFS) driver tests (QEMU)
+
+on:
+  push:
+    paths:
+      - 'fs/ps2fs/**'
+      - 'tests/ps2fs-qemu/**'
+      - 'tests/exfat-qemu/prepare-kernel.sh'
+      - '.github/workflows/ps2fs-tests.yml'
+  pull_request:
+    paths:
+      - 'fs/ps2fs/**'
+      - 'tests/ps2fs-qemu/**'
+      - 'tests/exfat-qemu/prepare-kernel.sh'
+      - '.github/workflows/ps2fs-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  ps2fs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Build test kernel and run tests
+        run: CONTAINER=docker tests/ps2fs-qemu/run.sh
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: ps2fs-test-logs
+          path: tests/ps2fs-qemu/work/*.log

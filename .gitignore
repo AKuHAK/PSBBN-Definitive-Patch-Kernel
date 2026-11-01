@@ -45,3 +45,6 @@ drivers/net/hamradio/soundmodem/sm_tbl_*.h
 
 # exFAT QEMU test work directory
 tests/exfat-qemu/work/
+
+# ps2fs QEMU test work directory
+tests/ps2fs-qemu/work/

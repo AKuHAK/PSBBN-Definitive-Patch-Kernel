@@ -1,0 +1,6 @@
+# Tools for the ps2fs QEMU test: emulator, image tools, and what pfsshell needs
+FROM docker.io/library/debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	qemu-system-x86 e2fsprogs bzip2 curl ca-certificates \
+	gcc libc6-dev meson ninja-build pkg-config git \
+	&& rm -rf /var/lib/apt/lists/*
