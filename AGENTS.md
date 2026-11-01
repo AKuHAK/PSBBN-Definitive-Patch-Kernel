@@ -75,6 +75,7 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 - `pad.c`: DualShock 2 controller driver.
   - Automatically swaps Cross (X) and Circle (O) buttons on Western consoles while preserving native behavior on Japanese consoles (`region == 'J'`).
 - `rm.c`: PS2 DVD Remote Control driver.
+- Memory card (`mc.c`, `mcdir.c`, `mcfile.c`, `mcfs/`): the kernel talks to the card through the PS2 Linux SBIOS calls `SBR_MC_OPEN`..`SBR_MC_GETENTSPACE` (145-159).  Under PSBBN these fail with `-SIF_RPCE_GETP` as soon as the IOP has data to return (any non-empty directory, opening a file); only GetInfo and lookups of missing names work.  PSBBN's own `libmc` (statically linked into `/opt0/bn/bn`) uses `SBR_MC_CALL` (ioctl `PS2MC_CALL`): a pass-through RPC to the IOP memory card server with `{u32 1, fno, send, ssize, recv, rsize}` and KSEG0 addresses; GetDir is function 13 with a 1044-byte request `{port, slot, mode, maxent, table, name[1024]}` and a 4-byte result.  A read-only probe through `SBR_MC_CALL` lists the card correctly.  Passing physical addresses makes the SBIOS oops with the card lock held.  Never write to a card without the owner's consent: it may be the boot card.
 
 ### C. Hard Disk & ATA Subsystem (`drivers/ide/`)
 - `ps2ide.c`: PS2 IDE host controller registration and DEV9 interface setup.
@@ -104,6 +105,7 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 
 0. **Testing**:
    - `tests/exfat-qemu/run.sh` builds a vanilla 2.4.17 i386 kernel with `fs/exfat` and runs a test suite in QEMU, with `fsck.exfat` after each phase. Run it after any change to `fs/exfat`; CI runs it too.
+   - `tests/ps2-hw/` has the tools for testing on a real PS2 (PSBBN), including a PFS checker that handles sub-partitions.
    - `tests/ps2fs-qemu/run.sh` does the same for `fs/ps2fs`, with pfsshell and ps2sdk's PFS fsck as the oracle. Run it after any change to `fs/ps2fs`.
    - Code that talks to the IOP cannot be emulated; say so when it is untested on hardware.
    - SIF RPC calls must retry on both `-SIF_RPCE_SENDP` (Sony SBIOS, used by PSBBN) and `-E_SIF_PKT_ALLOC` (kernelloader TGE).
