@@ -232,7 +232,7 @@ static void smaprpc_start_xmit2(struct smaprpc_chan *smap)
 			(void *) smap_rpc_data, skb->len,
 			smap_rpc_data, sizeof(smap_rpc_data),
 			(ps2sif_endfunc_t) smaprpc_rpcend_notify, (void *) &compl);
-	} while (rv == -E_SIF_PKT_ALLOC);
+	} while (rv == -E_SIF_PKT_ALLOC || rv == -SIF_RPCE_SENDP);
 	if (rv != 0) {
 		printk("%s: smaprpc_start_xmit2: callrpc failed, (%d)\n",
 			smap->net_dev->name, rv);
@@ -332,7 +332,7 @@ static void smaprpc_rpc_setup(struct smaprpc_chan *smap)
 			(void *) smap_rpc_data, 32,
 			smap_rpc_data, sizeof(smap_rpc_data),
 			(ps2sif_endfunc_t) smaprpc_rpcend_notify, (void *) &compl);
-	} while (rv == -E_SIF_PKT_ALLOC);
+	} while (rv == -E_SIF_PKT_ALLOC || rv == -SIF_RPCE_SENDP);
 	if (rv != 0) {
 		printk("%s: SMAP_CMD_GET_MAC_ADDR failed, (%d)\n", smap->net_dev->name,
 			rv);
@@ -358,7 +358,7 @@ static void smaprpc_rpc_setup(struct smaprpc_chan *smap)
 				(void *) smap_rpc_data, 32,
 				smap_rpc_data, 4,
 				(ps2sif_endfunc_t) smaprpc_rpcend_notify, (void *) &compl);
-		} while (rv == -E_SIF_PKT_ALLOC);
+		} while (rv == -E_SIF_PKT_ALLOC || rv == -SIF_RPCE_SENDP);
 		if (rv != 0) {
 			printk("%s: SMAP_CMD_SET_BUFFER failed, (rv = %d). Receive will not work.\n",
 				smap->net_dev->name, rv);
@@ -460,11 +460,13 @@ int smaprpc_probe(struct net_device *net_dev)
 	struct smaprpc_chan *smap = NULL;
 
 	int modflag = 0;
+	int handler_added = 0;
 
 	struct sb_sifaddcmdhandler_arg addcmdhandlerparam;
 
 	if (ps2_pccard_present != 0x0200) {
-		printk("PlayStation 2 HDD/Ethernet device NOT present (slim PSTwo).\n");
+		/* normal on fat consoles, which use the smap driver */
+		printk(KERN_DEBUG "PlayStation 2 HDD/Ethernet device NOT present (slim PSTwo).\n");
 		return (-ENODEV);
 	}
 
@@ -516,7 +518,8 @@ int smaprpc_probe(struct net_device *net_dev)
 	addcmdhandlerparam.data = (void *) smap;
 	if (sbios(SB_SIFADDCMDHANDLER, &addcmdhandlerparam) < 0) {
 		printk("Failed to initialize smap IRQ handler. Receive will not work.\n");
-	}
+	} else
+		handler_added = 1;
 
 	smaprpc_rpc_setup(smap);
 
@@ -525,11 +528,26 @@ int smaprpc_probe(struct net_device *net_dev)
 
 		printk("PlayStation 2 SMAP(Ethernet) device driver.\n");
 
+		smaprpc_chan = smap;	/* for smaprpc_cleanup_module() */
 		return (0);				/* success */
 	}
   error:
 	printk("PlayStation 2 SMAP(Ethernet) device not found.\n");
+	/* nothing may keep pointing at smap once it is freed */
+	if (handler_added) {
+		struct sb_sifremovecmdhandler_arg param;
+
+		param.fid = SIF_SMAP_RECEIVE;
+		sbios(SB_SIFREMOVECMDHANDLER, &param);
+	}
+	if (smap && modflag && smap->net_dev) {
+		unregister_netdev(smap->net_dev);
+		kfree(smap->net_dev);
+	} else if (smap && smap->net_dev)
+		smap->net_dev->priv = NULL;
 	if (smap) {
+		if (smap->shared_addr)
+			kfree(smap->shared_addr);
 		kfree(smap);
 	}
 	smaprpc_chan = NULL;
