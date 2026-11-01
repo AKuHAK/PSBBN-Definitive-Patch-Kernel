@@ -255,6 +255,23 @@ static void phase1(void)
 	}
 	closedir(d);
 	CHECK("unlink during readdir", i == 300 && count_dir(M "/many") == 300, "deleted=%ld count=%ld", i, count_dir(M "/many"));
+	/* rm -r style: unlink every entry, seeking back to the current
+	 * position each time, as glibc does when its buffer overflows */
+	mkdir(M "/many2", 0755);
+	for (i = 0; i < 300; i++) {
+		sprintf(p, M "/many2/f%03d", i);
+		fd = open(p, O_WRONLY | O_CREAT, 0644); if (fd >= 0) close(fd);
+	}
+	d = opendir(M "/many2"); i = 0;
+	while ((e = readdir(d))) {
+		if (e->d_name[0] == '.') continue;
+		sprintf(p, M "/many2/%s", e->d_name);
+		if (!unlink(p)) i++;
+		seekdir(d, telldir(d));
+	}
+	closedir(d);
+	CHECK("unlink all, seeking back", i == 300 && count_dir(M "/many2") == 0 && rmdir(M "/many2") == 0,
+	      "deleted=%ld left=%ld", i, count_dir(M "/many2"));
 	d = opendir(M "/many");
 	for (i = 0; i < 10; i++) readdir(d);
 	pos = telldir(d);

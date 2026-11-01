@@ -379,18 +379,32 @@ struct inode_operations exfat_dir_inode_operations = {
 };
 
 /*
- * Directory reading.  f_pos 0 and 1 are "." and "..", f_pos n >= 2 is the
- * (n-2)th entry.  An open directory keeps its FatFs directory object, so
- * sequential reads continue where they left off; any other position is
- * reached by rewinding and skipping entries.
+ * Directory reading.  f_pos 0 and 1 are "." and "..", an entry's f_pos is
+ * 2 + the byte offset of its entry set in the directory, so positions stay
+ * valid when other entries are removed.  An open directory keeps its FatFs
+ * directory object, so sequential reads continue where they left off; any
+ * other position (glibc seeks back when its buffer is full) is reached by
+ * rewinding to the first entry at or after it.
  */
 struct exfat_dir_priv {
 	DIR		dir;
 	FILINFO		fno;
-	loff_t		pos;		/* f_pos of the next entry of dir */
+	loff_t		pos;		/* f_pos that continues from dir */
+	loff_t		epos;		/* f_pos of the pending entry */
 	int		pending;	/* fno is read but was not delivered */
 	unsigned char	name[EXFAT_NAMEBUF];
 };
+
+/* Read the next entry into priv->fno; 1 if there is one.  sbi->lock held. */
+static int exfat_dir_next(struct exfat_dir_priv *priv, FRESULT *res)
+{
+	*res = f_readdir(&priv->dir, &priv->fno);
+	if (*res != FR_OK || !priv->fno.fname[0])
+		return 0;
+	priv->epos = 2 + (loff_t)priv->dir.blk_ofs;
+	priv->pending = 1;
+	return 1;
+}
 
 static int exfat_dir_open(struct inode *inode, struct file *filp)
 {
@@ -462,19 +476,14 @@ static int exfat_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	if (EXFAT_I(inode)->flags & EXFAT_I_DEAD)
 		return 0;
 
-	if (pos != priv->pos) {		/* seeked: rewind and skip */
+	if (pos != priv->pos) {		/* seeked: rewind, find the entry */
 		down(&sbi->lock);
 		res = f_readdir(&priv->dir, NULL);
-		priv->pos = 2;
 		priv->pending = 0;
-		while (res == FR_OK && priv->pos < pos) {
-			res = f_readdir(&priv->dir, &priv->fno);
-			if (res != FR_OK || !priv->fno.fname[0])
-				break;
-			priv->pos++;
-		}
+		while (res == FR_OK && exfat_dir_next(priv, &res) &&
+		       priv->epos < pos)
+			priv->pending = 0;
 		up(&sbi->lock);
-		pos = priv->pos;
 	}
 	/*
 	 * filldir() copies to user space and may fault into this
@@ -483,22 +492,24 @@ static int exfat_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	while (res == FR_OK) {
 		if (!priv->pending) {
 			down(&sbi->lock);
-			res = f_readdir(&priv->dir, &priv->fno);
+			len = exfat_dir_next(priv, &res);
 			up(&sbi->lock);
-			if (res != FR_OK || !priv->fno.fname[0])
+			if (!len)
 				break;
-			priv->pending = 1;
 		}
 		len = exfat_uni_to_name(sbi, priv->fno.fname, priv->name,
 					sizeof(priv->name));
 		/* d_ino must be nonzero; real inode numbers come from lookup */
-		if (filldir(dirent, (char *)priv->name, len, pos,
-			    ((inode->i_ino << 12) + pos) | 1,
-			    (priv->fno.fattrib & AM_DIR) ? DT_DIR : DT_REG) < 0)
+		if (filldir(dirent, (char *)priv->name, len, priv->epos,
+			    ((inode->i_ino << 12) + priv->epos) | 1,
+			    (priv->fno.fattrib & AM_DIR) ? DT_DIR : DT_REG) < 0) {
+			pos = priv->epos;
 			break;
+		}
 		priv->pending = 0;
-		priv->pos = ++pos;
+		pos = priv->epos + 1;
 	}
+	priv->pos = pos;
 	filp->f_pos = pos;
 	return exfat_errno(res);
 }
