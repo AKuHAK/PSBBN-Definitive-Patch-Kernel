@@ -25,6 +25,7 @@
 #include "sysconfcall.h"
 
 #define PS2SYSCONF_MAXDATASIZE	1024
+#define PS2SYSCONF_MAXLANG	11	/* Simplified Chinese */
 #define ARRAYSIZEOF(a)	(sizeof(a)/sizeof(*(a)))
 #define ERRORCHECK(res, stat)	((res) == PS2SYSCONFCALL_ABNORMAL ||	\
 				 ((stat) & SB_CDVD_CFG_STAT_CMDERR) ||	\
@@ -41,6 +42,7 @@ struct ps2sysconf_dev {
 	void (*dump_proc)(u_char *data, int);
 	int (*check_proc)(struct ps2sysconf_dev*, u_char *, int);
 	void (*update_proc)(struct ps2sysconf_dev*, u_char *, int);
+	void (*init_proc)(struct ps2sysconf_dev*);
 };
 
 static ssize_t ps2sysconf_read(struct file *, char *, size_t, loff_t *);
@@ -55,6 +57,7 @@ static int ps2sysconf_retry_closeconfig(int *stat);
 static void ps2sysconf_osd_dump(u_char *data, int n);
 static int ps2sysconf_osd_check(struct ps2sysconf_dev *, u_char *, int);
 static void ps2sysconf_osd_update(struct ps2sysconf_dev *, u_char *, int);
+static void ps2sysconf_osd_init(struct ps2sysconf_dev *);
 
 static int ps2sysconf_major = PS2SYSCONF_MAJOR;
 ps2sif_lock_t *ps2sysconf_lock;	/* the lock which is need to call SBIOS */
@@ -92,6 +95,7 @@ static struct ps2sysconf_dev ps2sysconf_devs[] = {
     .dump_proc = ps2sysconf_osd_dump,
     .check_proc = ps2sysconf_osd_check,
     .update_proc = ps2sysconf_osd_update,
+    .init_proc = ps2sysconf_osd_init,
   },
 };
 
@@ -359,6 +363,8 @@ int __init ps2sysconf_init(void)
 				dev->dump_proc(dev->data,
 					       dev->nblks*SB_CDVD_CFG_BLKSIZE);
 #endif
+			if (dev->init_proc)
+				dev->init_proc(dev);
 		}
 
 		/*
@@ -513,6 +519,37 @@ static void ps2sysconf_osd_update(struct ps2sysconf_dev *dev, u_char *data, int 
 	sysconf.video = osd01_00->Video;
 	*ps2_sysconf = sysconf; /* structure assignment */
 	spin_unlock_irqrestore(&ps2sysconf_spinlock, flags);
+}
+
+/*
+ * The boot loader passes Japanese in ps2_sysconf on every console, so take
+ * the language from the OSD block.  Bits 5-7 of its byte 0 are zero only on
+ * the first Japanese consoles, which keep just the Japanese/English bit.
+ * Later ones keep the language in byte 1; it is 8-11 (Russian, Korean,
+ * Chinese) on the models that offer those.
+ */
+static void ps2sysconf_osd_init(struct ps2sysconf_dev *dev)
+{
+	unsigned long flags;
+	int lang;
+
+	struct ps2sysconf_osd01_00 *osd01_00 = (void*)&dev->data[15*1 + 0];
+	struct ps2sysconf_osd01_01 *osd01_01 = (void*)&dev->data[15*1 + 1];
+	struct ps2sysconf_osd01_02 *osd01_02 = (void*)&dev->data[15*1 + 2];
+
+	if (!osd01_02->Init)
+		return;	/* the OSD has not been set up */
+	if (osd01_00->currentVersion == 0)
+		lang = osd01_00->oldLang;
+	else
+		lang = osd01_01->newLang;
+	if (PS2SYSCONF_MAXLANG < lang)
+		return;
+
+	spin_lock_irqsave(&ps2sysconf_spinlock, flags);
+	ps2_sysconf->language = lang;
+	spin_unlock_irqrestore(&ps2sysconf_spinlock, flags);
+	DPRINT("language %d\n", lang);
 }
 
 static void ps2sysconf_osd_dump(u_char *data, int n)
