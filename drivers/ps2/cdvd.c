@@ -77,6 +77,12 @@ int ps2cdvd_major = PS2CDVD_MAJOR;
 int ps2cdvd_read_ahead = 32;
 int ps2cdvd_spindown = 0;
 int ps2cdvd_wrong_disc_retry = 0;
+/*
+ * DVD-Video sectors are read with SBIOS call 196 (SBR_CDVD_READ_DVD), which
+ * only the kernelloader TGE SBIOS provides; Sony's SBIOS used by PSBBN has
+ * no such call, so it is used only when asked for.
+ */
+int ps2cdvd_dvdvideo = 0;
 
 MODULE_PARM(ps2cdvd_check_interval, "1-30i");
 MODULE_PARM(ps2cdvd_databuf_size, "1-256i");
@@ -86,6 +92,18 @@ MODULE_PARM(ps2cdvd_major, "0-255i");
 MODULE_PARM(ps2cdvd_read_ahead, "1-256i");
 MODULE_PARM(ps2cdvd_spindown, "0-3600i");
 MODULE_PARM(ps2cdvd_wrong_disc_retry, "0-1i");
+MODULE_PARM(ps2cdvd_dvdvideo, "0-1i");
+
+#define DVDV_READ()	(ps2cdvd.disc_type == SCECdDVDV && ps2cdvd_dvdvideo)
+
+#ifndef MODULE
+static int __init ps2cdvd_dvdvideo_setup(char *str)
+{
+	ps2cdvd_dvdvideo = simple_strtol(str, NULL, 0) != 0;
+	return 1;
+}
+__setup("ps2cdvd_dvdvideo=", ps2cdvd_dvdvideo_setup);
+#endif
 
 struct ps2cdvd_ctx ps2cdvd = {
 	disc_changed:	1,
@@ -291,7 +309,7 @@ ps2cdvd_check_cache(void)
 	DPRINT(DBG_READ, "REQ %p: sec=%ld  n=%ld  buf=%p\n",
 	       CURRENT, CURRENT->sector,
 	       CURRENT->current_nr_sectors, CURRENT->buffer);
-	if (ps2cdvd.disc_type == SCECdDVDV) {
+	if (DVDV_READ()) {
 		memcpy(CURRENT->buffer,
 		       ps2cdvd.databuf + DVD_DATA_OFFSET + DVD_DATA_SECT_SIZE * (CURRENT->sector/4 - ps2cdvd.databuf_addr),
 		       DATA_SECT_SIZE);
@@ -461,7 +479,7 @@ ps2cdvd_thread(void *arg)
 	       sn * 4, ps2cdvd_databuf_size, ps2cdvd.databuf,
 	       nsects != ps2cdvd_databuf_size ? "(retry)" : "");
 	ps2cdvd.databuf_nsects = 0;
-	if (ps2cdvd.disc_type == SCECdDVDV) {
+	if (DVDV_READ()) {
 		if (ps2cdvdcall_read_dvd(sn, nsects, ps2cdvd.databuf,
 				     &ps2cdvd.data_mode) != 0) {
 		    NEW_STATE(STAT_CHECK_DISC);
@@ -700,7 +718,7 @@ checkdisc()
      *  read label
      */
     if (read_label) {
-	if (ps2cdvd.disc_type == SCECdDVDV) {
+	if (DVDV_READ()) {
 		if (ps2cdvdcall_read_dvd(16, 1, ps2cdvd.labelbuf, &ps2cdvd.label_mode)!=0||
 		    ps2cdvdcall_geterror() != SCECdErNO) {
 		    DPRINT(DBG_DIAG, "read() failed\n");
@@ -715,7 +733,10 @@ checkdisc()
 		    goto error_out;
 		}
 	}
-	memcpy(ps2cdvd.labelbuf, ps2cdvd.labelbuf + DVD_DATA_OFFSET, DATA_SECT_SIZE);
+	/* DVD-Video sectors start with a 12-byte header; the buffers overlap */
+	if (DVDV_READ())
+		memmove(ps2cdvd.labelbuf, ps2cdvd.labelbuf + DVD_DATA_OFFSET,
+			DATA_SECT_SIZE);
 	ps2cdvd.label_valid = 1;
 	DPRINT(DBG_DLOCK, "label is valid\n");
 #ifdef PS2CDVD_DEBUG
@@ -794,7 +815,9 @@ spindown(void)
 	DPRINT(DBG_INFO, "spindown: data\n");
 	mode = ps2cdvd.data_mode;
 	mode.spindlctrl = SCECdSpinX2;
-	if (ps2cdvdcall_read_dvd(16, 1, ps2cdvd.databuf, &mode) != 0)
+	if ((ps2cdvd_dvdvideo ?
+	     ps2cdvdcall_read_dvd(16, 1, ps2cdvd.databuf, &mode) :
+	     ps2cdvdcall_read(16, 1, ps2cdvd.databuf, &mode)) != 0)
 	    DPRINT(DBG_DIAG, "spindown: data failed\n");
 	ps2cdvd_invalidate_discinfo();
 	break;
