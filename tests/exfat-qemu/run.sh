@@ -39,15 +39,15 @@ run_tools sh -c "cd /work && { [ -f $KERNEL ] || curl -fsSLO https://cdn.kernel.
 run_tools sh /repo/tests/exfat-qemu/prepare-kernel.sh "/work/$KERNEL" /repo /work
 
 echo "== build (gcc 2.95, i386)"
-# ARCH must be explicit: the Makefile takes it from uname -m, which is
-# x86_64 on 64-bit hosts
+# ARCH must be given to make: the Makefile sets it from uname -m, which
+# is x86_64 on 64-bit hosts
 run_woody sh -c 'cd linux-2.4.17 || exit 1
-	export ARCH=i386
+	M="make ARCH=i386"
 	fail() { echo "$1 failed:"; tail -40 "../$2"; exit 1; }
-	yes "" | make oldconfig >../oldconfig.log 2>&1
+	yes "" | $M oldconfig >../oldconfig.log 2>&1
 	grep -q "^CONFIG_EXFAT_FS=y" .config || fail "exFAT configuration" oldconfig.log
-	make dep >../dep.log 2>&1 || fail "make dep" dep.log
-	make -j$(grep -c ^processor /proc/cpuinfo) bzImage >../build.log 2>&1 ||
+	$M dep >../dep.log 2>&1 || fail "make dep" dep.log
+	$M -j$(grep -c ^processor /proc/cpuinfo) bzImage >../build.log 2>&1 ||
 		fail "make bzImage" build.log
 	grep -E "^(super|namei|file|misc)\.c:" ../build.log || true
 	cd .. && gcc -static -O2 -Wall -o exfattest /repo/tests/exfat-qemu/exfattest.c'
