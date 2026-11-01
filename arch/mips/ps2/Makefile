@@ -14,7 +14,7 @@
 O_TARGET := ps2.o
 
 export-objs = siflock.o sbcall.o iopheap.o prom.o dma.o gs.o debuglog.o \
-	      setup.o loadfile.o
+	      setup.o loadfile.o romver.o
 
 obj-y       += int-handler.o irq.o reset.o time.o
 obj-y       += powerbutton.o rtc.o pci.o

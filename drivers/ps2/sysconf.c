@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/string.h>
 #include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/major.h>
@@ -21,6 +22,7 @@
 #include <asm/ps2/siflock.h>
 #include <asm/ps2/sysconf.h>
 #include <asm/ps2/sysconfbits.h>
+#include <asm/ps2/romver.h>
 
 #include "sysconfcall.h"
 
@@ -311,6 +313,80 @@ ps2sysconf_release(struct inode *inode, struct file *filp)
 static int init_flags;
 #define INIT_DEV	(1<<0)
 
+/* OSD region letter (as in rom0:OSDVER) and its default language */
+static int ps2sysconf_osd_region;
+static int ps2sysconf_osd_deflang = -1;
+
+static const char *ps2sysconf_langcodes[PS2SYSCONF_MAXLANG + 1] = {
+	"jpn", "eng", "fre", "spa", "ger", "ita", "dut", "por",
+	"rus", "kor", "tch", "sch",
+};
+
+/* The languages the OSD offers in a region; it shows no others */
+static int ps2sysconf_osd_langvalid(int region, int lang)
+{
+	switch (region) {
+	case 'J':
+		return lang == 0 || lang == 1;
+	case 'A':	/* America */
+	case 'E':	/* Europe */
+		return 1 <= lang && lang <= 7;
+	case 'R':
+		return lang == 1 || lang == 8;
+	case 'K':
+		return lang == 1 || lang == 9;
+	case 'H':	/* Asia */
+		return lang == 1 || lang == 10;
+	case 'C':
+		return lang == 1 || lang == 11;
+	}
+	return 1;
+}
+
+/*
+ * Find the OSD region as the OSD does: from rom0:OSDVER, which slim
+ * consoles leave as "????" for the MECHACON's region parameters, or else
+ * from the region of rom0:ROMVER.  Talks to the MECHACON: call it without
+ * the lock.
+ */
+static void __init ps2sysconf_osd_region_init(void)
+{
+	u8 params[PS2_REGION_PARAMS];
+	char ver[17];
+	int i, region;
+
+	if (!ps2_rom_read_version(0, "OSDVER", ver, sizeof(ver)) &&
+	    strlen(ver) >= 8) {
+		if (ver[4] == '?') {
+			if (ps2_region_params(params))
+				return;
+			memcpy(&ver[4], &params[PS2_REGION_OSD], 4);
+		}
+		region = ver[4];
+		for (i = 0; i <= PS2SYSCONF_MAXLANG; i++)
+			if (!strncmp(&ver[5], ps2sysconf_langcodes[i], 3))
+				ps2sysconf_osd_deflang = i;
+	} else if (!ps2_rom_read_version(0, "ROMVER", ver, sizeof(ver)) &&
+		   strlen(ver) > 4) {
+		region = ver[4] == 'H' ? 'A' : ver[4];
+	} else
+		return;
+
+	if (ps2sysconf_osd_deflang < 0 ||
+	    !ps2sysconf_osd_langvalid(region, ps2sysconf_osd_deflang)) {
+		switch (region) {
+		case 'J': ps2sysconf_osd_deflang = 0; break;
+		case 'R': ps2sysconf_osd_deflang = 8; break;
+		case 'K': ps2sysconf_osd_deflang = 9; break;
+		case 'C': ps2sysconf_osd_deflang = 11; break;
+		default: ps2sysconf_osd_deflang = 1; break;
+		}
+	}
+	ps2sysconf_osd_region = region;
+	DPRINT("OSD region %c, default language %d\n", region,
+	       ps2sysconf_osd_deflang);
+}
+
 int __init ps2sysconf_init(void)
 {
 	int res;
@@ -318,6 +394,8 @@ int __init ps2sysconf_init(void)
 	int ndevs;
 
 	DPRINT("PlayStation 2 System Configuration: initialize...\n");
+
+	ps2sysconf_osd_region_init();
 
 	if ((ps2sysconf_lock = ps2sif_getlock(PS2LOCK_SYSCONF)) == NULL) {
 		printk(KERN_ERR "ps2sysconf: Can't get lock\n");
@@ -526,7 +604,9 @@ static void ps2sysconf_osd_update(struct ps2sysconf_dev *dev, u_char *data, int 
  * the language from the OSD block.  Bits 5-7 of its byte 0 are zero only on
  * the first Japanese consoles, which keep just the Japanese/English bit.
  * Later ones keep the language in byte 1; it is 8-11 (Russian, Korean,
- * Chinese) on the models that offer those.
+ * Chinese) on the models that offer those.  Like the OSD, use the region's
+ * default language instead of one the region does not offer: an export
+ * console with Japanese stored shows English in the OSD.
  */
 static void ps2sysconf_osd_init(struct ps2sysconf_dev *dev)
 {
@@ -545,6 +625,9 @@ static void ps2sysconf_osd_init(struct ps2sysconf_dev *dev)
 		lang = osd01_01->newLang;
 	if (PS2SYSCONF_MAXLANG < lang)
 		return;
+	if (ps2sysconf_osd_region &&
+	    !ps2sysconf_osd_langvalid(ps2sysconf_osd_region, lang))
+		lang = ps2sysconf_osd_deflang;
 
 	spin_lock_irqsave(&ps2sysconf_spinlock, flags);
 	ps2_sysconf->language = lang;
