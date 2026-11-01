@@ -71,6 +71,30 @@ jobs:
               cp System.map boot/System.map-2.4.17_mvl21
             '
 
+      - name: Sign kernel with POSIX cksum for osdboot loader
+        run: |
+          python3 -c "
+          import struct
+          path = 'boot/vmlinux-2.4.17_mvl21'
+          with open(path, 'rb') as f:
+              data = f.read()
+          crc = 0
+          for b in data:
+              crc ^= (b << 24)
+              for _ in range(8):
+                  crc = ((crc << 1) ^ 0x04C11DB7) & 0xFFFFFFFF if (crc & 0x80000000) else (crc << 1) & 0xFFFFFFFF
+          length = len(data)
+          while length > 0:
+              crc ^= ((length & 0xFF) << 24)
+              length >>= 8
+              for _ in range(8):
+                  crc = ((crc << 1) ^ 0x04C11DB7) & 0xFFFFFFFF if (crc & 0x80000000) else (crc << 1) & 0xFFFFFFFF
+          crc = ~crc & 0xFFFFFFFF
+          with open(path, 'ab') as f:
+              f.write(struct.pack('>I', crc))
+          print(f'Successfully signed {path} with POSIX cksum: 0x{crc:08x}')
+          "
+
       - name: Upload kernel artifact
         uses: actions/upload-artifact@v5
         with:
