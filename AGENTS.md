@@ -98,6 +98,7 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 - Reads the PlayStation 2 APA (Authentic Partition Architecture) partition table format used on PS2 HDDs.
 
 ### E. Additional Filesystems
+- `fs/ext3/` + `fs/jbd/`: ext3 is built in (`CONFIG_EXT3_FS=y`). PSBBN slim consoles cannot shut down cleanly, so ReiserFS replays its journal (4-5 s per partition) and ext2 needs `e2fsck` after every power-off; ext3 partitions replay a small journal instead. The root and `/opt0` mounts happen before modules are loaded, so ext3 must not become a module.
 - `fs/ps2fs/`: APA/PFS driver, read-write since the journal/segment rewrite. Mounts are **read-only unless `-o unsafe_write`** is given. The format and Sony's modification rules are in `Documentation/filesystems/ps2fs-format.md`; keep the driver to them (journaled metadata, exact bitmap, dentry type bits, CLOSED attr). ps2sdk is AFL-2.0: use it as a test oracle only, never copy its code.
 - `fs/exfat/`: exFAT driver built on FatFs R0.16 by ChaN plus Linux 2.4 VFS glue. Local FatFs changes are listed in `fs/exfat/README`.
 - `fs/mmcefs/`: Files on the SD card of an MMCE (SD2PSX, MemCard PRO2) through the IOP: a fileXio RPC client for `mmce0:`/`mmce1:`.
