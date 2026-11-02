@@ -607,6 +607,11 @@ static void ps2sysconf_osd_update(struct ps2sysconf_dev *dev, u_char *data, int 
  * Chinese) on the models that offer those.  Like the OSD, use the region's
  * default language instead of one the region does not offer: an export
  * console with Japanese stored shows English in the OSD.
+ *
+ * The pad and remote drivers swap Circle and Cross unless both language
+ * fields are zero, as on Japanese consoles and on ones whose OSD has not
+ * been set up.  They take the NVM as it is, before the region's default,
+ * and keep the choice until the next boot like bn's button textures.
  */
 static void ps2sysconf_osd_init(struct ps2sysconf_dev *dev)
 {
@@ -616,6 +621,9 @@ static void ps2sysconf_osd_init(struct ps2sysconf_dev *dev)
 	struct ps2sysconf_osd01_00 *osd01_00 = (void*)&dev->data[15*1 + 0];
 	struct ps2sysconf_osd01_01 *osd01_01 = (void*)&dev->data[15*1 + 1];
 	struct ps2sysconf_osd01_02 *osd01_02 = (void*)&dev->data[15*1 + 2];
+
+	ps2_sysconf_japanese = !osd01_00->oldLang && !osd01_01->newLang;
+	DPRINT("%s buttons\n", ps2_sysconf_japanese ? "Japanese" : "swapped");
 
 	if (!osd01_02->Init)
 		return;	/* the OSD has not been set up */

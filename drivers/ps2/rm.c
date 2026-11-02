@@ -20,6 +20,7 @@
 #include <asm/uaccess.h>
 #include <asm/ps2/siflock.h>
 #include <asm/ps2/rm.h>
+#include <asm/ps2/sysconf.h>
 
 #include "rmcall.h"
 #include "rm2call.h"
@@ -104,7 +105,8 @@ ps2rm_read(struct file *filp, char *buf, size_t size, loff_t *off)
 	*/
 
 	// Check if first 4 bytes match pattern_e0_prefix or pattern_d0_prefix
-	if (res >= 4 && 
+	// and the NVM language is not Japanese
+	if (res >= 4 && !ps2_sysconf_japanese &&
 	    (memcmp(data, pattern_e0_prefix, 4) == 0 || memcmp(data, pattern_d0_prefix, 4) == 0)) {
 
 		// printk(KERN_DEBUG "ps2rm: X/O match found - before: data[3]=0x%02X\n", data[3]);

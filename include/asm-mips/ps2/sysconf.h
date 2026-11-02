@@ -29,6 +29,8 @@ struct ps2_sysconf {
 
 #ifdef __KERNEL__
 extern struct ps2_sysconf *ps2_sysconf;
+/* Japanese in the NVM's OSD language fields: confirm with Circle */
+extern int ps2_sysconf_japanese;
 #endif
 
 #endif /* __ASM_PS2_SYSCONF_H */

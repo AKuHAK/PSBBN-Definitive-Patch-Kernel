@@ -31,8 +31,10 @@ int ps2_pccard_present;
 int ps2_pcic_type;
 struct ps2_sysconf *ps2_sysconf;
 spinlock_t ps2_sysconf_lock;
+int ps2_sysconf_japanese = 1;	/* until ps2sysconf reads the NVM */
 
 EXPORT_SYMBOL(ps2_sysconf);
+EXPORT_SYMBOL(ps2_sysconf_japanese);
 EXPORT_SYMBOL(ps2_sysconf_lock);
 EXPORT_SYMBOL(ps2_pccard_present);
 EXPORT_SYMBOL(__wbflush);
