@@ -41,6 +41,8 @@ RMMAN2, EESYNC2.
 
 1. It adds `IOMANX`, `FILEXIO` and `MMCEMAN` to image `234` and loads them
    before `EESYNC2`. Other files of the image are unchanged.
+1. It adds `IOMANX`, `FILEXIO`, `MMCEMAN`, and optionally `POWEROFF` to image `234`
+   and loads them before `EESYNC2`. Other files of the image are unchanged.
 2. It packs the image again. Its compressor is simpler than Sony's, so the
    image grows, and it rebuilds the IRX: data section, `.iopmod` sizes and
    `gp`, the two data-end constants, and section offsets.
@@ -61,6 +63,9 @@ loader cannot set up the IOP.
 python3 osdboot_mmce.py osdboot.elf osdboot_mmce.elf \
     ../../fs/mmcefs/irx/iomanX.irx ../../fs/mmcefs/irx/fileXio.irx \
     ../../fs/mmcefs/irx/mmceman.irx --no-crc-check
+    ../../fs/mmcefs/irx/mmceman.irx \
+    --poweroff ../../fs/mmcefs/irx/poweroff.irx \
+    --no-crc-check
 python3 verify.py osdboot.elf osdboot_mmce.elf   # needs: pip install unicorn
 ```
 

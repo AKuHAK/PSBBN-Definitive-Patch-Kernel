@@ -65,6 +65,8 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 - `dma.c`: EE DMA controller initialization and channel management (VIF, GIF, SIF, IPU).
 - `sbcall.c`: SIF RPC protocol for communicating with the I/O Processor (IOP).
 - `romver.c`: small `rom0:`/`rom1:` files (the EE reads the ROMs at `0x1FC00000`/`0x1E000000`) and the MECHACON region parameters (S-command 0x36 through CDVDFSV's S-command RPC service with the CDVD lock held; only MECHACON 6.0+, whose major version is byte 1 of the 0x03:00 reply).
+- `powerbutton.c`: Power button handling. Supports both Sony CDVDFSV `SB_CDVD_POWERHOOK` (Fat consoles) and `poweroff.irx` RPC / SIF command 20 (Slim consoles). Disables auto-shutoff so pressing the front panel power button triggers clean Linux shutdown (`SIGPWR`).
+- `reset.c`: Power off and reset routines. Issues MECHACON SCMD power-off writes (`0xBF402017=0; 0xBF402016=0x0F`) on Slim consoles after SBIOS halt, ensuring complete hardware shutdown.
 - `rtc.c` & `time.c`: PS2 Real-Time Clock and timer synchronization.
 
 ### B. Device Drivers (`drivers/ps2/`)
@@ -75,6 +77,8 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
   - Refactored by Andrew Church for high-throughput DMA transfers.
 - `pad.c`: DualShock 2 controller driver.
   - Swaps Cross (X) and Circle (O) unless `ps2_sysconf_japanese` is set, so that X confirms. `sysconf.c` sets it at init from the raw NVM: Japanese when both OSD language fields (block 1 byte 0 bit 4, byte 1 bits 0-4) are zero, also on consoles whose OSD has not been set up. It does not follow later writes; PSBBN's `/etc/rc.d/rc.bnlang` picks the button textures with the same rule at boot.
+  - Swaps Cross (X) and Circle (O) unless `ps2_sysconf_japanese` is set, so that X confirms. Works for both analog DualShock controllers and digital PS1 controllers (`res >= 4`, SCPH-1080).
+  - Filters out hardwired stuck D-Pad Left on Guitar Hero controllers (SG / Kramer) so PSBBN does not infinitely scroll left in game menus.
 - `rm.c`: PS2 DVD Remote Control driver. Swaps the X/O codes under the same rule as `pad.c`.
 - `sysconf.c`: OSD settings from the MECHACON NVM (`/dev/ps2sysconf`, `/proc/ps2sysconf`).
   - The boot loader passes Japanese in `ps2_sysconf` on every console, so at init the driver takes `language` from the OSD block. Bits 5-7 of block 1 byte 0 are zero only on the first Japanese consoles (Japanese/English bit 4 only); later ones hold the language in byte 1 bits 0-4, including 8-11 (Russian, Korean, Traditional and Simplified Chinese) on models sold with them. Layout reference: `OSDConfigStore_t` in ps2homebrew's OSD-Initialization-Libraries. As the OSD does, a language the OSD region does not offer (e.g. the Japanese that PSBBN leaves in the NVM of an export console, which the OSD shows as English) is replaced by the region's default language; the region is the letter of `rom0:OSDVER`, or of the MECHACON region parameters when that reads `????` (slim consoles).
@@ -86,6 +90,7 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 ### C. Hard Disk & ATA Subsystem (`drivers/ide/`)
 - `ps2ide.c`: PS2 IDE host controller registration and DEV9 interface setup.
   - Contains DEV9 reset logic required to initialize GameStar SATA network/HDD adapter clones.
+  - `ps2ide_power_off()`: Synchronously flushes volatile drive write-cache (`WIN_FLUSH_CACHE` = 0xE7) and issues standby immediate (`WIN_STANDBYNOW1` = 0xE0) to park heads and spin down disks before hardware power is cut. Protects both Fat Expansion Bay drives and Slim SCPH-70000 soldered IDE drives.
 - `ps2dma.c`: PS2 IDE DMA engine.
   - Implements GameStar clone detection and DEV9 transfer register configuration (`DEV9M_BASE + 0x32`, `0x64`).
   - Driver-private data is stored in `hwif->hwif_data` (`struct ps2ide_dma_priv`).

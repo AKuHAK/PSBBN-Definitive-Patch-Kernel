@@ -232,6 +232,8 @@ def main():
     ap.add_argument("iomanx")
     ap.add_argument("filexio")
     ap.add_argument("mmceman")
+    ap.add_argument("--poweroff",
+                    help="path to poweroff.irx for front-panel power button support on Slim PS2")
     ap.add_argument("--no-crc-check", action="store_true",
                     help="boot kernels without the trailing cksum too")
     ap.add_argument("--any-input", action="store_true",
@@ -265,6 +267,8 @@ def main():
     mods = [("IOMANX", open(a.iomanx, "rb").read()),
             ("FILEXIO", open(a.filexio, "rb").read()),
             ("MMCEMAN", open(a.mmceman, "rb").read())]
+    if a.poweroff:
+        mods.append(("POWEROFF", open(a.poweroff, "rb").read()))
     new_img, conf = add_modules(img, mods)
     packed = pack(new_img, key, xbyte)
     if unpack(packed) != new_img:
