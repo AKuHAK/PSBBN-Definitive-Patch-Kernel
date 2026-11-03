@@ -341,6 +341,11 @@ void handleRPCIRQ(iop_sifCmdBufferIrq_t *sifCmdBufferIrq, void *arg)
 	handleSimulatedIRQ(sifCmdBufferIrq->data[0]);
 }
 
+static void handlePowerOff(void *sifCmdBuffer, void *arg)
+{
+	kill_proc(1, SIGPWR, 1);
+}
+
 /*
  *  Initialize
  */
@@ -372,6 +377,13 @@ int __init ps2sif_init(void)
 	} else {
 		if (sbios(SB_SIFADDCMDHANDLER, &addcmdhandlerparam) < 0) {
 			printk("Failed to initialize SIF IRQ handler.\n");
+		}
+		/* SIF command 20 from poweroff.irx */
+		addcmdhandlerparam.fid = 20;
+		addcmdhandlerparam.func = (void *)handlePowerOff;
+		addcmdhandlerparam.data = NULL;
+		if (sbios(SB_SIFADDCMDHANDLER, &addcmdhandlerparam) < 0) {
+			printk("Failed to initialize SIF Power Off handler.\n");
 		}
 	}
     if (sbios(SB_SIFINITRPC, 0) < 0)
