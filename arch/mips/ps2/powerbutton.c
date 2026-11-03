@@ -30,7 +30,7 @@ static struct semaphore poweroff_rpc_sema;
 
 static void powerbutton_handler(void *);
 
-int __init ps2_powerbutton_init(void) static void poweroff_rpcend_notify(void *arg)
+static void poweroff_rpcend_notify(void *arg)
 {
     complete((struct completion *)arg);
 }
@@ -57,8 +57,7 @@ static int __init rte_powerhook(void)
     /* initialize CD/DVD */
     do {
         if (sbios_rpc(SBR_CDVD_INIT, NULL, &res) < 0)
-            return (-1);
-        return -1;
+            return -1;
     } while (res == -1);
 
     /* install power button hook */
@@ -66,7 +65,6 @@ static int __init rte_powerhook(void)
     arg.arg = NULL;
     sbios(SB_CDVD_POWERHOOK, &arg);
 
-    return (0);
     return 0;
 }
 
