@@ -38,6 +38,8 @@
 
 struct ps2pad_dev {
 	struct ps2pad_libctx *pad;
+	int seen_dpad_left_released;
+	int dpad_left_count;
 };
 
 struct ps2pad_ctl_dev {
@@ -316,22 +318,41 @@ ps2pad_read(struct file *filp, char *buf, size_t size, loff_t *off)
 
 	buttons = (data[3] << 8) | data[2];
 
-	// Only try to swap buttons if we have enough bytes and the NVM language is not Japanese
 	res = (data[1] & 0x0f) * 2 + 2;
-	if (res >= 6 && !ps2_sysconf_japanese) {
+	if (res >= 4) {
+		/* Handle guitar controller stuck D-Pad Left (Issue #616).
+		 * Real PS2 Guitar Hero controllers have D-Pad Left hardwired to GND
+		 * as a hardware identifier for guitar games. In PSBBN Linux userland,
+		 * this causes infinite scrolling to the left in the game list.
+		 * If D-Pad Left is pressed from initial connection and has never
+		 * been observed released, treat it as a hardwired guitar flag and mask it.
+		 */
+		if ((data[2] & 0x80) != 0) {
+			dev->seen_dpad_left_released = 1;
+		} else if (!dev->seen_dpad_left_released) {
+			if (++dev->dpad_left_count > 10) {
+				buttons |= 0x0080;
+				data[2] |= 0x80;
+			}
+		}
 
-		o_pressed = ((buttons & o_mask) == 0);
-		x_pressed = ((buttons & x_mask) == 0);
+		// Only try to swap buttons if we have enough bytes (res >= 4 for digital PS1, Issue #656)
+		// and the NVM language is not Japanese
+		if (!ps2_sysconf_japanese) {
 
-		// Set both released
-		buttons |= (o_mask | x_mask);
+			o_pressed = ((buttons & o_mask) == 0);
+			x_pressed = ((buttons & x_mask) == 0);
 
-		// Re-apply swapped
-		if (o_pressed) buttons &= ~x_mask;
-		if (x_pressed) buttons &= ~o_mask;
+			// Set both released
+			buttons |= (o_mask | x_mask);
 
-		data[2] = buttons & 0xFF;
-		data[3] = (buttons >> 8) & 0xFF;
+			// Re-apply swapped
+			if (o_pressed) buttons &= ~x_mask;
+			if (x_pressed) buttons &= ~o_mask;
+
+			data[2] = buttons & 0xFF;
+			data[3] = (buttons >> 8) & 0xFF;
+		}
 	}
 
 	/*
@@ -593,6 +614,8 @@ ps2pad_open(struct inode *inode, struct file *filp)
 		filp->private_data = dev;
 
 		dev->pad = &ps2pad_pads[i];
+		dev->seen_dpad_left_released = 0;
+		dev->dpad_left_count = 0;
 	}
 
 	if (open_devices++ == 0)
