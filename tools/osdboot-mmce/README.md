@@ -72,3 +72,26 @@ unpacker reads the new data back to the new image, and that only `ROMDIR` and
 
 With the modules resident, mount mmcefs with `-o noload` (it also finds
 fileXio by itself).
+
+## IOP Memory Budget and Limits for Adding Modules
+
+Retail PS2 consoles (Fat and Slim) have exactly **2 MB (2,048 KB)** of IOP RAM. When adding extra IRX modules (such as `iLinkman` + `sbp2man` for i.Link/FireWire storage, or custom filesystem daemons), memory is constrained in two distinct phases:
+
+### 1. Decompression phase (peak memory usage)
+Before rebooting the IOP into Linux mode, the loader executes the unpacker function in IRX `234`. The unpacker allocates a contiguous block from IOP sysmem (`AllocSysMemory(mode=2, size=unpacked_size + 1056)`):
+- Base minimal IOP kernel (LOADCORE, SYSMEM, SYSCLIB): ~150 KB
+- IRX `234` itself (code + compressed IOPRP payload): ~350 KB
+- Temporary buffer for unpacked IOPRP: ~747 KB
+- **Peak RAM used during unpack:** ~1,247 KB out of 2,048 KB (~61%).
+- **Headroom during decompression:** **~800 KB**.
+
+### 2. Resident phase (after IOP reboot)
+Once unpacked, the IOP reboots with the unpacked IOPRP, clearing the unpacker and temporary buffers.
+- Total resident memory (`.text` + `.data` + `.bss`) across all 34 modules currently in image `234` is **937 KB** (~0.92 MB).
+- **Free IOP RAM remaining:** **~1,000 KB (~1 MB)** for heap, thread stacks, and DMA buffers.
+
+### 3. Guidelines for adding extra drivers
+- **Safe margin:** Up to **~400–450 KB** of additional unpacked IRX modules can be added safely to image `234` without risking `AllocSysMemory` failure during decompression.
+- **EE memory:** The new ELF segment in `osdboot.elf` is placed at `0x12c5000` with heap following at `0x131ab00`. With 32 MB of EE RAM, over 12 MB of headroom remains.
+- **Address patching:** `osdboot_mmce.py` dynamically computes and patches the `IRX_END` and `IRX_ENDM4` `lui`/`addiu` instruction pairs in the unpacker, so compressed payloads of arbitrary sizes are handled automatically.
+- **Hardware conflicts:** Avoid loading network drivers (`smap.irx` / `ps2ip.irx`) on the IOP if the Linux kernel on the EE operates its own `smap.c` driver, as concurrent register access and interrupt handling will conflict. i.Link storage (`iLinkman.irx` + `sbp2man.irx`, ~55 KB total) has no EE driver conflict and fits easily.
