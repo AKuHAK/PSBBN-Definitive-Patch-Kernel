@@ -39,8 +39,6 @@ RMMAN2, EESYNC2.
 
 ## What the script changes
 
-1. It adds `IOMANX`, `FILEXIO` and `MMCEMAN` to image `234` and loads them
-   before `EESYNC2`. Other files of the image are unchanged.
 1. It adds `IOMANX`, `FILEXIO`, `MMCEMAN`, and optionally `POWEROFF` to image `234`
    and loads them before `EESYNC2`. Other files of the image are unchanged.
 2. It packs the image again. Its compressor is simpler than Sony's, so the
@@ -62,7 +60,6 @@ loader cannot set up the IOP.
 ```sh
 python3 osdboot_mmce.py osdboot.elf osdboot_mmce.elf \
     ../../fs/mmcefs/irx/iomanX.irx ../../fs/mmcefs/irx/fileXio.irx \
-    ../../fs/mmcefs/irx/mmceman.irx --no-crc-check
     ../../fs/mmcefs/irx/mmceman.irx \
     --poweroff ../../fs/mmcefs/irx/poweroff.irx \
     --no-crc-check
