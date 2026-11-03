@@ -12,8 +12,13 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/init.h>
+#include <asm/addrspace.h>
 #include <asm/ps2/sbcall.h>
 #include "ps2.h"
+
+#ifdef CONFIG_BLK_DEV_PS2_IDE
+extern void ps2ide_power_off(void);
+#endif
 
 #ifdef CONFIG_AKMEM
 #include <linux/akmemio.h>
@@ -36,6 +41,9 @@ void ps2dev_cleanup(void);
 void ps2_machine_restart(char *command)
 {
 	sys_sync();
+#ifdef CONFIG_BLK_DEV_PS2_IDE
+	ps2ide_power_off();
+#endif
 	ps2_exit_drivers();
 #ifdef CONFIG_AKMEM
 	akmem_exec(akmem_map, akmem_lastcode_r5900,
@@ -48,6 +56,9 @@ void ps2_machine_halt(void)
 {
 	printk(KERN_NOTICE "\n** You can safely turn off the power\n");
 	sys_sync();
+#ifdef CONFIG_BLK_DEV_PS2_IDE
+	ps2ide_power_off();
+#endif
 	ps2_exit_drivers();
 	ps2_halt(SB_HALT_MODE_HALT);
 }
@@ -55,8 +66,16 @@ void ps2_machine_halt(void)
 void ps2_machine_power_off(void)
 {
 	sys_sync();
+#ifdef CONFIG_BLK_DEV_PS2_IDE
+	ps2ide_power_off();
+#endif
 	ps2_exit_drivers();
 	ps2_halt(SB_HALT_MODE_PWROFF);
+
+	/* Manual MECHACON power off for Slim PS2 consoles (SCPH-70000+) */
+	*(volatile u8 *)KSEG1ADDR(0x1F402017) = 0x00;
+	*(volatile u8 *)KSEG1ADDR(0x1F402016) = 0x0F;
+	while (1) ;
 }
 
 void ps2_exit_drivers(void)

@@ -212,3 +212,29 @@ void __init ps2_ide_init(void)
 	if (ps2_pccard_present == 0x0100)
 		ps2_hdd_register();
 }
+
+#ifndef WIN_FLUSH_CACHE
+#define WIN_FLUSH_CACHE 0xE7
+#endif
+
+void ps2ide_power_off(void)
+{
+	int i, j;
+	ide_hwif_t *hwif;
+	ide_drive_t *drive;
+
+	for (i = 0; i < MAX_HWIFS; i++) {
+		hwif = &ide_hwifs[i];
+		if (!hwif->present)
+			continue;
+		for (j = 0; j < MAX_DRIVES; j++) {
+			drive = &hwif->drives[j];
+			if (!drive->present || drive->media != ide_disk)
+				continue;
+			printk(KERN_INFO "ps2ide: Flushing write cache on %s...\n", drive->name);
+			ide_wait_cmd(drive, WIN_FLUSH_CACHE, 0, 0, 0, NULL);
+			printk(KERN_INFO "ps2ide: Parking heads (standby immediate) on %s...\n", drive->name);
+			ide_wait_cmd(drive, WIN_STANDBYNOW1, 0, 0, 0, NULL);
+		}
+	}
+}
