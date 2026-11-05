@@ -1,0 +1,26 @@
+name: APA + MBR partition table tests
+
+on:
+  push:
+    paths:
+      - 'fs/partitions/ps2.*'
+      - 'tests/ps2-partitions/**'
+      - '.github/workflows/ps2-partitions-tests.yml'
+  pull_request:
+    paths:
+      - 'fs/partitions/ps2.*'
+      - 'tests/ps2-partitions/**'
+      - '.github/workflows/ps2-partitions-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  ps2-partitions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run tests
+        run: CONTAINER=docker tests/ps2-partitions/run.sh

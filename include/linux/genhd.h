@@ -59,9 +59,9 @@ struct partition {
 #  include <linux/devfs_fs_kernel.h>
 
 struct hd_seg_struct {
-	long start_sect;
-	long nr_sects;
-	long offset;
+	unsigned long start_sect;
+	unsigned long nr_sects;
+	unsigned long offset;
 };
 
 struct hd_struct {
@@ -71,7 +71,7 @@ struct hd_struct {
 	int number;                     /* stupid old code wastes space  */
 	int nr_segs;
 	struct hd_seg_struct *seg;
-	long hash_unit;
+	unsigned long hash_unit;
 	struct hd_seg_struct **hash;
 };
 

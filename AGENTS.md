@@ -103,6 +103,7 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 
 ### D. Partition Table Format (`fs/partitions/ps2.c`)
 - Reads the PlayStation 2 APA (Authentic Partition Architecture) partition table format used on PS2 HDDs.
+- `__linux.N` becomes minor N. A classic MBR in sector 0 (inside the APA header, as APA-Jail places it) gives its primary entries the last four minors of the disk (`hda60`..`hda63` for entries 1..4, `hdb60`.. on the slave); a disk without APA goes to the normal MBR parser. An entry is used only if it lies on the disk, the APA chain is intact, and it overlaps no APA partition except those named `__exfat*`, and not their APA header areas; type 0x17 (the APA-Jail entry over APA) is skipped. Test: `tests/ps2-partitions/run.sh`.
 
 ### E. Additional Filesystems
 - `fs/ext3/` + `fs/jbd/`: ext3 is built in (`CONFIG_EXT3_FS=y`). PSBBN slim consoles cannot shut down cleanly, so ReiserFS replays its journal (4-5 s per partition) and ext2 needs `e2fsck` after every power-off; ext3 partitions replay a small journal instead. The root and `/opt0` mounts happen before modules are loaded, so ext3 must not become a module.

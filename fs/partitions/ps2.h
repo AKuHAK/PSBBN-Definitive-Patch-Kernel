@@ -65,4 +65,18 @@ struct ps2_partition {
 
 #define PS2_LINUX_ID		"__linux."
 
+/*
+ * A classic MBR in sector 0, inside the APA header (as APA-Jail places
+ * it).  Its primary partitions get the last PS2_MBR_PARTS minors of the
+ * disk (hda60..hda63), apart from the __linux.N numbers.  An entry is used
+ * only if it lies on the disk and overlaps no APA partition other than
+ * those whose name starts with PS2_MBR_RESERVE_ID, which reserve its space
+ * on the APA side; even there it must leave their APA headers alone.
+ * The APA-Jail entry (type 0x17) spans the APA area and is skipped.
+ */
+#define PS2_MBR_PARTS		4
+#define PS2_MBR_TABLE		0x1be
+#define PS2_MBR_TYPE_JAIL	0x17
+#define PS2_MBR_RESERVE_ID	"__exfat"
+
 int ps2_partition(struct gendisk *hd, struct block_device *bdev , unsigned long first_sector, int first_part_minor);

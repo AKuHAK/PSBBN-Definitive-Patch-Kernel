@@ -16,6 +16,7 @@
 #include <linux/blk.h>
 #include "./ps2.h"
 #include <linux/slab.h>
+#include <linux/string.h>
 
 static unsigned int get_ptable_blocksize(kdev_t dev)
 {
@@ -65,11 +66,118 @@ static unsigned int get_ptable_blocksize(kdev_t dev)
 
 
 
+struct ps2_mbr_part {
+	unsigned long start;
+	unsigned long nr_sects;
+	char apa_id[PS2_PART_NID + 1];	/* APA partition it clashes with */
+};
+
+static unsigned long ps2_get_le32(const unsigned char *p)
+{
+	return p[0] | (p[1] << 8) | (p[2] << 16) | ((unsigned long) p[3] << 24);
+}
+
+/* 1 if the sector ranges [s1, s1 + n1) and [s2, s2 + n2) intersect */
+static int ps2_overlap(unsigned long s1, unsigned long n1,
+		       unsigned long s2, unsigned long n2)
+{
+	if (n1 == 0 || n2 == 0)
+		return 0;
+	return s1 <= s2 ? s2 - s1 < n1 : s1 - s2 < n2;
+}
+
+/* The MBR entries of sector 0 that are partitions on this disk */
+static void ps2_mbr_read(const unsigned char *sect0, unsigned long disk_sects,
+			 struct ps2_mbr_part *mp)
+{
+	const unsigned char *e;
+	unsigned long start, n;
+	int i;
+
+	memset(mp, 0, sizeof(*mp) * PS2_MBR_PARTS);
+	if (sect0[510] != 0x55 || sect0[511] != 0xaa)
+		return;
+	for (i = 0; i < PS2_MBR_PARTS; i++) {
+		e = sect0 + PS2_MBR_TABLE + 16 * i;
+		start = ps2_get_le32(e + 8);
+		n = ps2_get_le32(e + 12);
+		if (e[4] == 0 || e[4] == PS2_MBR_TYPE_JAIL || n == 0 ||
+		    start >= disk_sects || n > disk_sects - start)
+			continue;
+		mp[i].start = start;
+		mp[i].nr_sects = n;
+	}
+}
+
+/*
+ * Drop the MBR entries that overlap the APA partition of main header pp.
+ * A reserving partition may hold them, but not its APA header areas
+ * (resv_m sectors of the main partition, resv_s of each sub).
+ */
+static void ps2_mbr_exclude(struct ps2_partition *pp, struct ps2_mbr_part *mp,
+			    int resv_m, int resv_s)
+{
+	int i, j, hit, reserve;
+	unsigned long nm, ns;
+
+	reserve = strncmp(pp->id, PS2_MBR_RESERVE_ID,
+			  strlen(PS2_MBR_RESERVE_ID)) == 0;
+	nm = reserve ? resv_m : pp->nsector;
+	for (i = 0; i < PS2_MBR_PARTS; i++) {
+		if (mp[i].nr_sects == 0)
+			continue;
+		hit = ps2_overlap(pp->start, nm, mp[i].start, mp[i].nr_sects);
+		for (j = 0; !hit && j < pp->nsub && j < PS2_PART_MAXSUB; j++) {
+			ns = reserve ? resv_s : pp->subs[j].nsector;
+			hit = ps2_overlap(pp->subs[j].start, ns,
+					  mp[i].start, mp[i].nr_sects);
+		}
+		if (hit) {
+			mp[i].nr_sects = 0;
+			memcpy(mp[i].apa_id, pp->id, PS2_PART_NID);
+			mp[i].apa_id[PS2_PART_NID] = '\0';
+		}
+	}
+}
+
+/* Give the MBR entries left the last PS2_MBR_PARTS minors of the disk */
+static int ps2_mbr_add(struct gendisk *hd, kdev_t dev, struct ps2_mbr_part *mp)
+{
+	struct hd_struct *part;
+	int i, added = 0;
+
+	for (i = 0; i < PS2_MBR_PARTS; i++) {
+		if (mp[i].nr_sects == 0)
+			continue;
+		part = &hd->part[MINOR(dev) + hd->max_p - PS2_MBR_PARTS + i];
+		if (part->nr_sects != 0) {
+			/* the number is taken by an APA __linux.N partition */
+			mp[i].nr_sects = 0;
+			sprintf(mp[i].apa_id, "%s%d", PS2_LINUX_ID,
+				hd->max_p - PS2_MBR_PARTS + i);
+			continue;
+		}
+		if (part->hash) {
+			kfree(part->hash);
+			part->hash = NULL;
+		}
+		if (part->seg) {
+			kfree(part->seg);
+			part->seg = NULL;
+		}
+		part->nr_segs = 0;
+		part->start_sect = mp[i].start;
+		part->nr_sects = mp[i].nr_sects;
+		added++;
+	}
+	return added;
+}
+
 static int ps2_partition_one(struct gendisk *hd, kdev_t dev,
 			     struct ps2_partition *pp, int resv_m, int resv_s)
 {
 	int i, pno;
-	long nr_sects;
+	unsigned long nr_sects;
 	struct hd_struct *part;
 	struct hd_seg_struct *seg, *sp;
 	char *p, *pe;
@@ -153,8 +261,9 @@ int ps2_partition(struct gendisk *hd, struct block_device *bdev , unsigned long 
 	struct buffer_head *bh;
 	int dev_bsize, dev_ssize, stob, resv_m, resv_s;
 	struct ps2_partition *pp;
-	long sect;
-	int i;
+	struct ps2_mbr_part mp[PS2_MBR_PARTS];
+	unsigned long sect;
+	int i, complete, mbr_parts;
 	char buf[8];
 	kdev_t dev;
 
@@ -176,9 +285,10 @@ int ps2_partition(struct gendisk *hd, struct block_device *bdev , unsigned long 
 		resv_s = 1;
 
 	sect = 0;
+	complete = 0;
 	do {
 		if ((bh = bread(dev, sect / stob, dev_bsize)) == 0) {
-			printk("%s: unable to read sector %ld\n",
+			printk("%s: unable to read sector %lu\n",
 				kdevname(dev), sect);
 			return -1;
 		}
@@ -189,23 +299,42 @@ int ps2_partition(struct gendisk *hd, struct block_device *bdev , unsigned long 
 				brelse(bh);
 				return 0;
 			}
+			ps2_mbr_read((unsigned char *) bh->b_data,
+				     hd->part[MINOR(dev)].nr_sects, mp);
 		}
+		if (pp->magic == PS2_PARTITION_MAGIC &&
+		    (pp->flag & PS2_PART_FLAG_SUB) == 0)
+			ps2_mbr_exclude(pp, mp, resv_m, resv_s);
 		if (!ps2_partition_one(hd, dev, pp, resv_m, resv_s)) {
 			brelse(bh);
 			break;
 		}
 		sect = pp->next;
 		brelse(bh);
+		if (sect == 0)
+			complete = 1;
 	} while (sect != 0);
+
+	/* MBR partitions only when the whole APA chain was checked */
+	mbr_parts = 0;
+	if (complete && hd->max_p > PS2_MBR_PARTS)
+		mbr_parts = ps2_mbr_add(hd, dev, mp);
 
         printk(" [APA]");
 	for (i = 1; i < hd->max_p; i++) {
+		if (mbr_parts && i == hd->max_p - PS2_MBR_PARTS)
+			printk(" [MBR]");
 		if (hd->part[MINOR(dev) + i].nr_sects != 0) {
                         printk(" %s", disk_name(hd, MINOR(dev) + i, buf)); /* new */
                 }
                                 
 	}
 	printk ("\n");
+
+	for (i = 0; complete && i < PS2_MBR_PARTS; i++)
+		if (mp[i].apa_id[0])
+			printk(KERN_WARNING "%s: MBR partition %d clashes with APA partition %s, not used\n",
+			       kdevname(dev), i + 1, mp[i].apa_id);
 
 	return 1;
 }
