@@ -16,7 +16,8 @@ and boots it in QEMU with a 2.5 TiB sparse disk as `hdb`.  The guest
 (`lba48test.c`, run as init) checks that the capacity is 2^32 - 1 sectors,
 then in three passes (PIO, DMA, PIO with multiple mode 16) writes and reads
 back sectors below, across and above 2^28, across 2^31 and at the end of the
-disk, each stamped with its LBA.  `check.py` verifies on the host that every
+disk (up to its last whole KiB: the 2.4 block layer sizes devices in KiB, so
+the odd last sector of 2^32 - 1 is not reachable), each stamped with its LBA.  `check.py` verifies on the host that every
 stamped sector is at its own address in the image.  Partition 2 of the disk,
 at 200 GiB, holds exFAT: the guest writes and reads an 8 MiB file there and
 the host runs `fsck.exfat` on it afterwards.

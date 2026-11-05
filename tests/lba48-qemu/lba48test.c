@@ -21,8 +21,10 @@
 #include <sys/reboot.h>
 #include <sys/sysmacros.h>
 
+#ifndef BLKGETSIZE
 #define BLKGETSIZE	0x1260
 #define BLKFLSBUF	0x1261
+#endif
 #define HDIO_GET_MULTCOUNT	0x0304
 #define HDIO_GET_DMA	0x030b
 #define HDIO_SET_MULTCOUNT	0x0321
@@ -146,7 +148,12 @@ int main(void)
 			region(fd, 0x0fffffe0UL - pass * 8, pass, "across 2^28");
 			region(fd, 0x10001000UL + pass * 4096, pass, "above 2^28");
 			region(fd, 0x7fffffe0UL - pass * 8, pass, "across 2^31");
-			region(fd, size - NSECT - pass * 4096, pass, "end of disk");
+			/*
+			 * The block layer sizes devices in 1 KiB units, so the
+			 * last sector of an odd-sized disk (2^32 - 1 here) is
+			 * not reachable through /dev/hdb.
+			 */
+			region(fd, (size & ~1UL) - NSECT - pass * 4096, pass, "end of disk");
 		}
 		close(fd);
 	}
