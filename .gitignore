@@ -48,3 +48,9 @@ tests/exfat-qemu/work/
 
 # ps2fs QEMU test work directory
 tests/ps2fs-qemu/work/
+
+# APA + MBR partition test work directory
+tests/ps2-partitions/work/
+
+# 48-bit LBA QEMU test work directory
+tests/lba48-qemu/work/

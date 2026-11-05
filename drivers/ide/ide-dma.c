@@ -586,7 +586,10 @@ int ide_dmaproc (ide_dma_action_t func, ide_drive_t *drive)
 #else /* !CONFIG_BLK_DEV_IDEDMA_TIMEOUT */
 			ide_set_handler(drive, &ide_dma_intr, WAIT_CMD, dma_timer_expiry);	/* issue cmd to drive */
 #endif /* CONFIG_BLK_DEV_IDEDMA_TIMEOUT */
-			OUT_BYTE(reading ? WIN_READDMA : WIN_WRITEDMA, IDE_COMMAND_REG);
+			if (drive->rq_lba48)
+				OUT_BYTE(reading ? WIN_READDMA_EXT : WIN_WRITEDMA_EXT, IDE_COMMAND_REG);
+			else
+				OUT_BYTE(reading ? WIN_READDMA : WIN_WRITEDMA, IDE_COMMAND_REG);
 		case ide_dma_begin:
 			/* Note that this is done *after* the cmd has
 			 * been issued to the drive, as per the BM-IDE spec.

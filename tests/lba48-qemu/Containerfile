@@ -1,0 +1,5 @@
+# Tools for the LBA48 QEMU test: emulator, exFAT utilities, Python
+FROM docker.io/library/debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	qemu-system-x86 exfatprogs e2fsprogs bzip2 curl ca-certificates python3 \
+	&& rm -rf /var/lib/apt/lists/*

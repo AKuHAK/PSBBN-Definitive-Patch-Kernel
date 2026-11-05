@@ -367,8 +367,36 @@ static ide_startstop_t recal_intr (ide_drive_t *drive)
  */
 static ide_startstop_t do_rw_disk (ide_drive_t *drive, struct request *rq, unsigned long block)
 {
+	byte rcmd, wcmd;
+
 	if (IDE_CONTROL_REG)
 		OUT_BYTE(drive->ctl,IDE_CONTROL_REG);
+	/*
+	 * 48-bit commands only for requests that end above the 28-bit
+	 * limit, so that the rest of the disk keeps the 28-bit path.
+	 * The block layer counts sectors in 32 bits: LBA 47:32 stay 0.
+	 */
+	drive->rq_lba48 = drive->addressing &&
+		block > 0x10000000UL - rq->nr_sectors;
+	if (drive->rq_lba48) {
+		/* each register takes the high-order byte first */
+		OUT_BYTE(0x00, IDE_FEATURE_REG);
+		OUT_BYTE(0x00, IDE_FEATURE_REG);
+		OUT_BYTE(rq->nr_sectors >> 8, IDE_NSECTOR_REG);
+		OUT_BYTE(rq->nr_sectors, IDE_NSECTOR_REG);
+		OUT_BYTE(block >> 24, IDE_SECTOR_REG);
+		OUT_BYTE(0x00, IDE_LCYL_REG);
+		OUT_BYTE(0x00, IDE_HCYL_REG);
+		OUT_BYTE(block, IDE_SECTOR_REG);
+		OUT_BYTE(block >> 8, IDE_LCYL_REG);
+		OUT_BYTE(block >> 16, IDE_HCYL_REG);
+		OUT_BYTE(drive->select.all, IDE_SELECT_REG);
+		rcmd = drive->mult_count ? WIN_MULTREAD_EXT : WIN_READ_EXT;
+		wcmd = drive->mult_count ? WIN_MULTWRITE_EXT : WIN_WRITE_EXT;
+		goto issue;
+	}
+	rcmd = drive->mult_count ? WIN_MULTREAD : WIN_READ;
+	wcmd = drive->mult_count ? WIN_MULTWRITE : WIN_WRITE;
 	OUT_BYTE(0x00, IDE_FEATURE_REG);
 	OUT_BYTE(rq->nr_sectors,IDE_NSECTOR_REG);
 #ifdef CONFIG_BLK_DEV_PDC4030
@@ -407,22 +435,26 @@ static ide_startstop_t do_rw_disk (ide_drive_t *drive, struct request *rq, unsig
 		return do_pdc4030_io (drive, rq);
 	}
 #endif /* CONFIG_BLK_DEV_PDC4030 */
+issue:
 	if (rq->cmd == READ) {
 #ifdef CONFIG_BLK_DEV_IDEDMA
-		if (drive->using_dma && !(HWIF(drive)->dmaproc(ide_dma_read, drive)))
+		/* DMA for 48-bit requests only where dmaproc issues 48-bit commands */
+		if (drive->using_dma && (!drive->rq_lba48 || HWIF(drive)->lba48_dma) &&
+		    !(HWIF(drive)->dmaproc(ide_dma_read, drive)))
 			return ide_started;
 #endif /* CONFIG_BLK_DEV_IDEDMA */
 		ide_set_handler(drive, &read_intr, WAIT_CMD, NULL);
-		OUT_BYTE(drive->mult_count ? WIN_MULTREAD : WIN_READ, IDE_COMMAND_REG);
+		OUT_BYTE(rcmd, IDE_COMMAND_REG);
 		return ide_started;
 	}
 	if (rq->cmd == WRITE) {
 		ide_startstop_t startstop;
 #ifdef CONFIG_BLK_DEV_IDEDMA
-		if (drive->using_dma && !(HWIF(drive)->dmaproc(ide_dma_write, drive)))
+		if (drive->using_dma && (!drive->rq_lba48 || HWIF(drive)->lba48_dma) &&
+		    !(HWIF(drive)->dmaproc(ide_dma_write, drive)))
 			return ide_started;
 #endif /* CONFIG_BLK_DEV_IDEDMA */
-		OUT_BYTE(drive->mult_count ? WIN_MULTWRITE : WIN_WRITE, IDE_COMMAND_REG);
+		OUT_BYTE(wcmd, IDE_COMMAND_REG);
 		if (ide_wait_stat(&startstop, drive, DATA_READY, drive->bad_wstat, WAIT_DRQ)) {
 			printk(KERN_ERR "%s: no DRQ after issuing %s\n", drive->name,
 				drive->mult_count ? "MULTWRITE" : "WRITE");
@@ -509,15 +541,35 @@ static void idedisk_revalidate (ide_drive_t *drive)
 static void init_idedisk_capacity (ide_drive_t  *drive)
 {
 	struct hd_driveid *id = drive->id;
+	unsigned short *w = (unsigned short *) id;
 	unsigned long capacity = drive->cyl * drive->head * drive->sect;
 
 	drive->select.b.lba = 0;
+	drive->addressing = 0;
 
 	/* Determine capacity, and use LBA if the drive properly supports it */
 	if ((id->capability & 2) && lba_capacity_is_ok(id)) {
 		capacity = id->lba_capacity;
 		drive->cyl = capacity / (drive->head * drive->sect);
 		drive->select.b.lba = 1;
+	}
+
+	/*
+	 * 48-bit LBA (ATA-6): supported and enabled bits in words 83 and 86,
+	 * capacity in words 100-103.  The 2.4 block layer counts sectors in
+	 * 32 bits, so a drive larger than 2 TiB is used up to 2 TiB.
+	 */
+	if (drive->select.b.lba && (id->command_set_2 & 0x0400) &&
+	    (id->cfs_enable_2 & 0x0400)) {
+		unsigned long cap48 = w[100] | ((unsigned long) w[101] << 16);
+
+		if (w[102] || w[103])
+			cap48 = 0xffffffffUL;
+		if (cap48 > capacity) {
+			capacity = cap48;
+			drive->cyl = capacity / (drive->head * drive->sect);
+			drive->addressing = 1;
+		}
 	}
 	drive->capacity = capacity;
 }
@@ -767,11 +819,13 @@ static void idedisk_setup (ide_drive_t *drive)
 	    (!drive->forced_geom) && drive->bios_sect && drive->bios_head)
 		drive->bios_cyl = (capacity / drive->bios_sect) / drive->bios_head;
 
-	printk (KERN_INFO "%s: %ld sectors", drive->name, capacity);
+	printk (KERN_INFO "%s: %lu sectors", drive->name, capacity);
 
 	/* Give size in megabytes (MB), not mebibytes (MiB). */
 	/* We compute the exact rounded value, avoiding overflow. */
-	printk (" (%ld MB)", (capacity - capacity/625 + 974)/1950);
+	printk (" (%lu MB)", (capacity - capacity/625 + 974)/1950);
+	if (drive->addressing)
+		printk (", LBA48");
 
 	/* Only print cache size when it was specified */
 	if (id->buf_size)

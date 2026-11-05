@@ -1,0 +1,43 @@
+name: 48-bit LBA tests (QEMU)
+
+on:
+  push:
+    paths:
+      - 'drivers/ide/ide-disk.c'
+      - 'drivers/ide/ide-dma.c'
+      - 'include/linux/ide.h'
+      - 'include/linux/hdreg.h'
+      - 'tests/lba48-qemu/**'
+      - 'tests/exfat-qemu/prepare-kernel.sh'
+      - '.github/workflows/lba48-tests.yml'
+  pull_request:
+    paths:
+      - 'drivers/ide/ide-disk.c'
+      - 'drivers/ide/ide-dma.c'
+      - 'include/linux/ide.h'
+      - 'include/linux/hdreg.h'
+      - 'tests/lba48-qemu/**'
+      - 'tests/exfat-qemu/prepare-kernel.sh'
+      - '.github/workflows/lba48-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  lba48:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Build test kernel and run tests
+        run: CONTAINER=docker tests/lba48-qemu/run.sh
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: lba48-test-logs
+          path: |
+            tests/lba48-qemu/work/*.log
+            tests/lba48-qemu/work/lba48.txt

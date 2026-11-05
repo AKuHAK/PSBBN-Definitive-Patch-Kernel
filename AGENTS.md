@@ -95,6 +95,8 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
   - Implements GameStar clone detection and DEV9 transfer register configuration (`DEV9M_BASE + 0x32`, `0x64`).
   - Driver-private data is stored in `hwif->hwif_data` (`struct ps2ide_dma_priv`).
   - Configures UDMA modes for disk transfers.
+  - DMA transfers run on the IOP: `DMARELAY` (in the loader's IOP image `234`) writes `req->command` to the ATA command register as given; the EE side programs the taskfile before the RPC.
+- `ide-disk.c`: 48-bit LBA. The capacity comes from IDENTIFY words 100-103 when words 83/86 bit 10 are set, capped at 2^32 - 1 sectors (the 2.4 block layer counts sectors in 32 bits, so disks above 2 TiB are used up to 2 TiB). Only requests that end above 2^28 sectors use the EXT commands; the rest of the disk keeps the 28-bit path. DMA is used for those requests only where `hwif->lba48_dma` is set (`ps2dma.c`); other dmaprocs that issue their own 28-bit DMA command fall back to PIO. Test: `tests/lba48-qemu/run.sh`.
 
 ### C2. CD/DVD (`drivers/ps2/cdvd.c`)
 - DVD-Video sectors need SBIOS call 196, which only the kernelloader TGE SBIOS has. It is used only with `ps2cdvd_dvdvideo=1` (boot or module parameter); PSBBN's Sony SBIOS lacks it.

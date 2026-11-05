@@ -72,6 +72,14 @@
 #define WIN_READDMA		0xC8	/* read sectors using DMA transfers */
 #define WIN_WRITEDMA		0xCA	/* write sectors using DMA transfers */
 
+/* 48-bit LBA (ATA-6) */
+#define WIN_READ_EXT		0x24
+#define WIN_READDMA_EXT		0x25
+#define WIN_MULTREAD_EXT	0x29
+#define WIN_WRITE_EXT		0x34
+#define WIN_WRITEDMA_EXT	0x35
+#define WIN_MULTWRITE_EXT	0x39
+
 #define WIN_QUEUED_SERVICE	0xA2	/* */
 #define WIN_READDMA_QUEUED	0xC7	/* read sectors using Queued DMA transfers */
 #define WIN_WRITEDMA_QUEUED	0xCC	/* write sectors using Queued DMA transfers */

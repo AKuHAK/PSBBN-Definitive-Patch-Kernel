@@ -284,7 +284,7 @@ static int ps2_ide_dmaproc (ide_dma_action_t func, ide_drive_t *drive)
 			*if_ctrl_reg = val;
 			*xfr_ctrl_reg = 0x86; /* 0 | 0x86 (dir | 0x86) */
 		}
-		req->command = WIN_READDMA;
+		req->command = drive->rq_lba48 ? WIN_READDMA_EXT : WIN_READDMA;
 		req->devctrl = drive->ctl;
 		drive->waiting_for_dma = 1;
 		ide_set_handler(drive, &ide_dma_intr, WAIT_CMD, NULL);
@@ -334,7 +334,7 @@ static int ps2_ide_dmaproc (ide_dma_action_t func, ide_drive_t *drive)
 			*if_ctrl_reg = val;
 			*xfr_ctrl_reg = 0x87; /* 1 | 0x86 (dir | 0x86) */
 		}
-		req->command = WIN_WRITEDMA;
+		req->command = drive->rq_lba48 ? WIN_WRITEDMA_EXT : WIN_WRITEDMA;
 		drive->waiting_for_dma = 1;
 		ide_set_handler(drive, &ide_dma_intr, WAIT_CMD, NULL);
 
@@ -535,6 +535,8 @@ void __init ps2_ide_setup_dma (ide_hwif_t *hwif)
 	hwif->dma_base = 1;
 	hwif->dmatable_cpu = (void *)t;
 	hwif->dmaproc = &ps2_ide_dmaproc;
+	/* DMARELAY on the IOP writes req->command to the ATA command register as is */
+	hwif->lba48_dma = 1;
 	if (!noautodma)
 		hwif->autodma = 1;
 	for (i = 0; i < MAX_DRIVES; i++)
