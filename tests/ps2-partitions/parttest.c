@@ -39,7 +39,7 @@ void panic(const char *msg)
 
 char *disk_name(struct gendisk *hd, int minor, char *buf)
 {
-	sprintf(buf, "hda%d", minor);
+	sprintf(buf, "hda%d", minor & 63);
 	return buf;
 }
 

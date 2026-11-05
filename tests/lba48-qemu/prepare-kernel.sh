@@ -22,7 +22,7 @@ sed -i -e '/^	unsigned ata_flash	: 1;/r '"$3/f-drive" \
 # PIIX hands reads and writes to ide_dmaproc, which issues 48-bit commands
 sed -i 's/^	hwif->dmaproc = &piix_dmaproc;$/&\n	hwif->lba48_dma = 1;/' "$L/drivers/ide/piix.c"
 
-[ "$(grep -c -E 'unsigned (addressing|rq_lba48|	lba48_dma)|part_usage\[' "$L/include/linux/ide.h")" = 4 ]
+[ "$(grep -c -E 'unsigned[ 	]+(addressing|rq_lba48|lba48_dma)[ 	]|part_usage\[' "$L/include/linux/ide.h")" = 4 ]
 grep -q 'lba48_dma = 1' "$L/drivers/ide/piix.c"
 grep -q 'WIN_READ_EXT' "$L/drivers/ide/ide-disk.c"
 echo "prepared $L"
