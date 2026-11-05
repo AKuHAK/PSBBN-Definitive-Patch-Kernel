@@ -15,11 +15,14 @@
 #include <linux/config.h>
 #include <linux/spinlock.h>
 #include <linux/sched.h>
+#include <linux/timer.h>
+#include <asm/addrspace.h>
 #include <asm/signal.h>
 #include <asm/ps2/sifdefs.h>
 #include <asm/ps2/sbcall.h>
 #include "ps2.h"
 
+#define CDVD_REG_PWOFF                  0x1F402008
 #define POWEROFF_SID                    0x9090900
 #define PWRBTN_MODE_SHUTDOWN            0x01
 #define PWRBTN_MODE_ENABLE_AUTO_SHUTOFF 0x02
@@ -28,7 +31,43 @@ static ps2sif_clientdata_t cd_poweroff_rpc;
 static int rpc_initialized = 0;
 static struct semaphore poweroff_rpc_sema;
 
+static struct timer_list powerbutton_timer;
+static int shutdown_initiated = 0;
+
 static void powerbutton_handler(void *);
+
+static void powerbutton_poll(unsigned long unused)
+{
+    volatile u8 *reg;
+    u8 val;
+
+    reg = (volatile u8 *)KSEG1ADDR(CDVD_REG_PWOFF);
+    val = *reg;
+
+    /*
+     * Bit 2 (0x04) is asserted by MECHACON on power button press.
+     * Bit 0 (0x01) indicates drive busy / data ready.
+     * Writing 0x04 clears the interrupt bit on the CDVD interface,
+     * acknowledging the event to Dragon MECHACON and preventing its
+     * internal watchdog timer (~500ms) from pulling hardware RESET
+     * (fast reset).
+     */
+    if ((val & 0x01) == 0 && (val & 0x04) != 0) {
+        *reg = 0x04;
+        if (!shutdown_initiated) {
+            shutdown_initiated = 1;
+            printk(KERN_INFO "PS2 power button pressed: initiating clean shutdown\n");
+            kill_proc(1, SIGPWR, 1);
+        }
+    }
+
+    /*
+     * Keep polling even after shutdown is initiated so any subsequent
+     * button presses continue to be acknowledged, preventing MECHACON
+     * from triggering a fast reset while filesystems are unmounting.
+     */
+    mod_timer(&powerbutton_timer, jiffies + (HZ / 20));
+}
 
 static void poweroff_rpcend_notify(void *arg)
 {
@@ -130,30 +169,46 @@ int ps2_powerbutton_enable_auto_shutoff(int enable_auto_shutoff)
 
 int __init ps2_powerbutton_init(void)
 {
-    int rte_rv;
-    int rpc_rv;
+    int rte_rv = -1;
+    int rpc_rv = -1;
+    volatile u8 *reg;
+
+    /* Clear any stale power button interrupt flag on MECHACON */
+    reg = (volatile u8 *)KSEG1ADDR(CDVD_REG_PWOFF);
+    if (*reg & 0x04)
+        *reg = 0x04;
 
 #ifdef CONFIG_PS2_SBIOS_VER_CHECK
-    if (sbios(SB_GETVER, NULL) < 0x0201)
-        return -1;
+    if (sbios(SB_GETVER, NULL) >= 0x0201)
 #endif
+    {
+        rte_rv = rte_powerhook();
+        rpc_rv = poweroff_rpc_bind();
 
-    rte_rv = rte_powerhook();
-    rpc_rv = poweroff_rpc_bind();
-
-    if (rpc_rv == 0) {
-        /* Disable auto shutdown so poweroff.irx informs Linux via SIF
-         * instead of cutting hardware power abruptly without unmounting/parking. */
-        ps2_powerbutton_enable_auto_shutoff(0);
+        if (rpc_rv == 0) {
+            /* Disable auto shutdown so poweroff.irx informs Linux via SIF
+             * instead of cutting hardware power abruptly without unmounting/parking. */
+            ps2_powerbutton_enable_auto_shutoff(0);
+        }
     }
 
-    if (rte_rv == 0 || rpc_rv == 0)
-        return 0;
+    /*
+     * Direct MECHACON hardware polling for PS2 Slim consoles (and Fat models
+     * without Sony CDVDFSV or poweroff.irx). Polls CDVDreg_PWOFF every 50ms
+     * to intercept button presses directly on the EE and prevent MECHACON fast reset.
+     */
+    init_timer(&powerbutton_timer);
+    powerbutton_timer.function = powerbutton_poll;
+    powerbutton_timer.data = 0;
+    powerbutton_timer.expires = jiffies + (HZ / 20);
+    add_timer(&powerbutton_timer);
 
-    return -1;
+    printk(KERN_INFO "PS2 power button monitor initialized (polling 0x1F402008 @ 20Hz)\n");
+    return 0;
 }
 
 static void powerbutton_handler(void *arg)
 {
+    shutdown_initiated = 1;
     kill_proc(1, SIGPWR, 1);
 }

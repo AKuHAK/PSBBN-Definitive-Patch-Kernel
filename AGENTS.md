@@ -65,7 +65,7 @@ cp System.map rootfs/boot/System.map-2.4.17_mvl21
 - `dma.c`: EE DMA controller initialization and channel management (VIF, GIF, SIF, IPU).
 - `sbcall.c`: SIF RPC protocol for communicating with the I/O Processor (IOP).
 - `romver.c`: small `rom0:`/`rom1:` files (the EE reads the ROMs at `0x1FC00000`/`0x1E000000`) and the MECHACON region parameters (S-command 0x36 through CDVDFSV's S-command RPC service with the CDVD lock held; only MECHACON 6.0+, whose major version is byte 1 of the 0x03:00 reply).
-- `powerbutton.c`: Power button handling. Supports both Sony CDVDFSV `SB_CDVD_POWERHOOK` (Fat consoles) and `poweroff.irx` RPC / SIF command 20 (Slim consoles). Disables auto-shutoff so pressing the front panel power button triggers clean Linux shutdown (`SIGPWR`).
+- `powerbutton.c`: Power button handling. Supports Sony CDVDFSV `SB_CDVD_POWERHOOK` (Fat consoles), `poweroff.irx` RPC / SIF command 20, and direct MECHACON hardware register polling (`0x1F402008` @ 20Hz on Slim consoles). Acknowledges MECHACON power button interrupts (`0x04`) directly on EE uncached MMIO to prevent the hardware ~500ms watchdog timer from triggering a fast reset, then sends `SIGPWR` to `init` for clean shutdown and filesystem unmount.
 - `reset.c`: Power off and reset routines. Issues MECHACON SCMD power-off writes (`0xBF402017=0; 0xBF402016=0x0F`) on Slim consoles after SBIOS halt, ensuring complete hardware shutdown.
 - `rtc.c` & `time.c`: PS2 Real-Time Clock and timer synchronization.
 
