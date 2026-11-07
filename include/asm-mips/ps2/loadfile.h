@@ -20,10 +20,18 @@ extern int ps2_load_module_buffer(const void *buf, int size,
 
 /*
  * As above, for an IRX file the IOP opens itself ("mc0:/dir/x.irx",
- * "rom0:NAME").  Servers that cannot load from memory (PSBBN's IOP:
- * ps2_load_module_buffer() returns -ENOSYS) still have this one.
+ * "rom0:NAME").
  */
 extern int ps2_load_module(const char *path, const char *args, int arglen,
 			   int *modres);
+
+/*
+ * Standard SBV (Subversive) runtime patches for the IOP:
+ * - ps2_sbv_patch_enable_lmb: enables LoadModuleBuffer (RPC func 6) in rom0:LOADFILE
+ * - ps2_sbv_patch_disable_prefix_check: disables device prefix check in MODLOAD (allows mc0:, etc.)
+ * Both are automatically applied when the LOADFILE RPC service binds.
+ */
+extern int ps2_sbv_patch_enable_lmb(void);
+extern int ps2_sbv_patch_disable_prefix_check(void);
 
 #endif /* __ASM_PS2_LOADFILE_H */

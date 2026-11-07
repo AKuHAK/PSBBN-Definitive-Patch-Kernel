@@ -58,28 +58,15 @@ Things to report back if it fails: full dmesg, the step, the exact error.
 Hardware findings (2026-11-01)
 ------------------------------
 
-  - PSBBN's IOP has a LOADFILE server (the RPC binds) and it serves
-    function 0 (LF_F_MOD_LOAD, load from a path the IOP can open, e.g.
-    rom0:): "rom0:NOSUCH" gave -203, a ROM module loaded.
-  - It does not serve function 6 (LF_F_MOD_BUF_LOAD), which
-    ps2_load_module_buffer() uses: the reply never arrives in the receive
-    buffer, which keeps the IOP address we sent (so mmcefs logs the same
-    "IOP module 994816" = 0xF2E00 for every IRX) and fileXio never
-    starts ("fileXio RPC service not available (-19)").  This is not a
-    D-cache problem: invalidating the buffer after the reply changes
-    nothing.  ps2_load_module_buffer() should detect this (result ==
-    the address it sent) and fail with a clear message.
-  - So the IRX files must come from a path the IOP can read.  The memory
-    card would be the natural place, but on that console every file RPC
-    to the card failed at the SBIOS level (Open 145, GetDir 152, Mkdir:
-    "sbios_rpc: RPC failed ... result=-1", -SIF_RPCE_GETP) while GetInfo
-    worked, also right after a reboot.  Not investigated further.
-  - Done since: ps2_load_module() loads by IOP path (function 0), and
-    mmcefs falls back to irx_iop (default mc0:/LINUXIRX) when function 6
-    is missing.  Not yet tested on hardware.
-  - Other ways out: load the three modules before Linux starts (boot
-    loader / IOP reset image) and mount with noload; or find another IOP
-    device for the files.
+  - PSBBN's IOP has a stock LOADFILE server which originally served only
+    function 0 (LF_F_MOD_LOAD) and rejected unsigned mc0: paths (-201).
+  - Runtime SBV patches in arch/mips/ps2/loadfile.c now resolve this:
+    * ps2_sbv_patch_enable_lmb() patches the LOADFILE RPC jump table to
+      support function 6 (LF_F_MOD_BUF_LOAD). ps2_load_module_buffer()
+      can now dynamically load modules (iomanX, fileXio, mmceman) from
+      EE memory buffers directly into IOP memory without modifying BB.ELF.
+    * ps2_sbv_patch_disable_prefix_check() disables the MODLOAD path check,
+      allowing ps2_load_module() to load modules from mc0: if needed.
   - Do not test LF_F_MOD_LOAD with a ROM module that is already running
     (e.g. rom0:SIO2MAN): it loads a second copy, and the console later
     locked up and had to be power-cycled.
