@@ -259,9 +259,6 @@ int ps2_sbv_patch_disable_prefix_check(void)
 	struct slib_exp_lib *modload;
 	u32 check_prefix_addr;
 	volatile u32 *code;
-	ps2sif_dmadata_t sdd;
-	unsigned int dmaid;
-	static u32 patch_buf[4] __attribute__((aligned(64)));
 
 	modload = slib_get_exp_lib("modload");
 	if (!modload) {
@@ -279,18 +276,9 @@ int ps2_sbv_patch_disable_prefix_check(void)
 	if (code[0] == 0x03e00008 && code[1] == 0x00001021)
 		return 0; /* already patched */
 
-	patch_buf[0] = 0x03e00008; /* jr $ra */
-	patch_buf[1] = 0x00001021; /* move $v0, $zero (return 0 = allowed) */
-	patch_buf[2] = 0;
-	patch_buf[3] = 0;
-	dma_cache_wback_inv((unsigned long)patch_buf, 16);
-
-	sdd.data = (unsigned int)patch_buf;
-	sdd.addr = check_prefix_addr;
-	sdd.size = 16;
-	sdd.mode = 0;
-	dmaid = ps2sif_setdma_wait(&sdd, 1);
-	ps2sif_dmastat_wait(dmaid);
+	code[0] = 0x03e00008; /* jr $ra */
+	code[1] = 0x00001021; /* move $v0, $zero (return 0 = allowed) */
+	__asm__ __volatile__("sync.l");
 
 	printk(KERN_INFO "ps2loadfile: MODLOAD prefix check disabled\n");
 	return 0;
@@ -312,7 +300,6 @@ int ps2_sbv_patch_enable_lmb(void)
 	ps2sif_dmadata_t sdd;
 	unsigned int dmaid;
 	static u32 lmb_buf[32] __attribute__((aligned(64)));
-	static u32 dma_word[4] __attribute__((aligned(64)));
 
 	modload = slib_get_exp_lib("modload");
 	if (!modload) {
@@ -384,25 +371,13 @@ int ps2_sbv_patch_enable_lmb(void)
 	dmaid = ps2sif_setdma_wait(&sdd, 1);
 	ps2sif_dmastat_wait(dmaid);
 
-	/* Patch jump table entry 6 */
-	dma_word[0] = (u32)patch_addr;
-	dma_cache_wback_inv((unsigned long)dma_word, 16);
-	sdd.data = (unsigned int)dma_word;
-	sdd.addr = entry6_addr;
-	sdd.size = 16;
-	sdd.mode = 0;
-	dmaid = ps2sif_setdma_wait(&sdd, 1);
-	ps2sif_dmastat_wait(dmaid);
+	/* Patch jump table entry 6 (exact word via uncached bus mapping) */
+	*(volatile u32 *)ps2sif_bustovirt(entry6_addr & 0x001FFFFF) = (u32)patch_addr;
 
-	/* Patch boundary check: sltiu $v0, $a0, 7 */
-	dma_word[0] = 0x2c820007;
-	dma_cache_wback_inv((unsigned long)dma_word, 16);
-	sdd.data = (unsigned int)dma_word;
-	sdd.addr = match_off + 4;
-	sdd.size = 16;
-	sdd.mode = 0;
-	dmaid = ps2sif_setdma_wait(&sdd, 1);
-	ps2sif_dmastat_wait(dmaid);
+	/* Patch boundary check: sltiu $v0, $a0, 7 (exact word; preserves branch and ra save) */
+	*(volatile u32 *)ps2sif_bustovirt((match_off + 4) & 0x001FFFFF) = 0x2c820007;
+
+	__asm__ __volatile__("sync.l");
 
 	printk(KERN_INFO "ps2loadfile: LOADFILE LoadModuleBuffer (func 6) enabled\n");
 	return 0;
