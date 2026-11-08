@@ -225,24 +225,19 @@ static int mmcefs_load_irx_file(const char *name, char *path, int *modres)
  */
 static int mmcefs_load_irx(const char *name)
 {
-	static int iop_only;
 	char path[256];
 	int rv = -ENOSYS, modres = -1;
 
 	if (strlen(irx_dir) + strlen(name) + 2 > sizeof(path) ||
 	    strlen(irx_iop) + strlen(name) + 2 > sizeof(path))
 		return -ENAMETOOLONG;
-	if (!iop_only) {
-		rv = mmcefs_load_irx_file(name, path, &modres);
-		if (rv == -ENOSYS || rv == -ENOENT) {
-			printk(KERN_INFO "mmcefs: %s; loading modules from "
-			       "%s\n", rv == -ENOSYS ? "the IOP cannot load "
-			       "modules from memory" : "no IRX files in irx_dir",
-			       irx_iop);
-			iop_only = 1;
-		}
-	}
-	if (iop_only) {
+
+	rv = mmcefs_load_irx_file(name, path, &modres);
+	if (rv == -ENOSYS || rv == -ENOENT) {
+		printk(KERN_INFO "mmcefs: %s; loading modules from "
+		       "%s\n", rv == -ENOSYS ? "the IOP cannot load "
+		       "modules from memory" : "no IRX files in irx_dir",
+		       irx_iop);
 		sprintf(path, "%s/%s", irx_iop, name);
 		rv = ps2_load_module(path, NULL, 0, &modres);
 	}

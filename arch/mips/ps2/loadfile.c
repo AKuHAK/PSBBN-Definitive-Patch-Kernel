@@ -176,11 +176,8 @@ static const u32 lmb_patch_template[32] = {
 
 static int smod_get_mod_by_name(const char *name, struct smod_mod_info *info)
 {
-	u32 next;
+	u32 next = 0x800;
 	int len = strlen(name);
-
-	/* Head of global module list is at IOP address 0x800 */
-	next = *(volatile u32 *)ps2sif_bustovirt(0x800);
 
 	while (next && (next & 0x001FFFFF) < 0x00200000) {
 		struct smod_mod_info *cur;
@@ -204,9 +201,16 @@ static struct slib_exp_lib *slib_get_exp_lib(const char *name)
 	struct smod_mod_info loadcore_info;
 	u32 core_end, cur;
 	int i, len;
+	u32 next_mod;
 
-	if (!smod_get_mod_by_name("loadcore", &loadcore_info))
+	/* In PS2 IOP, 0x800 is System_Memory_Manager; its next pointer
+	 * points directly to Module_Manager (loadcore). */
+	next_mod = *(volatile u32 *)ps2sif_bustovirt(0x800);
+	if (!next_mod || (next_mod & 0x001FFFFF) >= 0x00200000) {
+		printk(KERN_ERR "ps2loadfile: failed to locate loadcore head at 0x800\n");
 		return NULL;
+	}
+	loadcore_info = *(struct smod_mod_info *)ps2sif_bustovirt(next_mod & 0x001FFFFF);
 
 	core_end = loadcore_info.text_start + loadcore_info.text_size;
 
@@ -233,8 +237,10 @@ static struct slib_exp_lib *slib_get_exp_lib(const char *name)
 		}
 	}
 
-	if (!cur)
+	if (!cur) {
+		printk(KERN_ERR "ps2loadfile: loadcore export table not found\n");
 		return NULL;
+	}
 
 	len = strlen(name);
 	while (cur && (cur & 0x001FFFFF) < 0x00200000) {
@@ -244,6 +250,7 @@ static struct slib_exp_lib *slib_get_exp_lib(const char *name)
 		cur = lib->prev;
 	}
 
+	printk(KERN_ERR "ps2loadfile: export library '%s' not found\n", name);
 	return NULL;
 }
 
@@ -257,12 +264,16 @@ int ps2_sbv_patch_disable_prefix_check(void)
 	static u32 patch_buf[4] __attribute__((aligned(64)));
 
 	modload = slib_get_exp_lib("modload");
-	if (!modload)
+	if (!modload) {
+		printk(KERN_ERR "ps2loadfile: sbv prefix patch: modload not found\n");
 		return -ENODEV;
+	}
 
 	check_prefix_addr = modload->exports[15];
-	if (!check_prefix_addr)
+	if (!check_prefix_addr) {
+		printk(KERN_ERR "ps2loadfile: sbv prefix patch: check_prefix_addr is 0\n");
 		return -EINVAL;
+	}
 
 	code = (volatile u32 *)ps2sif_bustovirt(check_prefix_addr & 0x001FFFFF);
 	if (code[0] == 0x03e00008 && code[1] == 0x00001021)
@@ -304,16 +315,22 @@ int ps2_sbv_patch_enable_lmb(void)
 	static u32 dma_word[4] __attribute__((aligned(64)));
 
 	modload = slib_get_exp_lib("modload");
-	if (!modload)
+	if (!modload) {
+		printk(KERN_ERR "ps2loadfile: sbv lmb patch: modload not found\n");
 		return -ENODEV;
+	}
 
 	pStartModule = modload->exports[8];
 	pLoadModuleBuffer = modload->exports[10];
-	if (!pStartModule || !pLoadModuleBuffer)
+	if (!pStartModule || !pLoadModuleBuffer) {
+		printk(KERN_ERR "ps2loadfile: sbv lmb patch: StartModule/LoadModuleBuffer missing\n");
 		return -EINVAL;
+	}
 
-	if (!smod_get_mod_by_name("LoadModuleByEE", &loadfile_info))
+	if (!smod_get_mod_by_name("LoadModuleByEE", &loadfile_info)) {
+		printk(KERN_ERR "ps2loadfile: sbv lmb patch: LoadModuleByEE not found\n");
 		return -ENODEV;
+	}
 
 	scan_start = loadfile_info.text_start + 0x400;
 	scan_end = loadfile_info.text_start + 0x600;
@@ -334,8 +351,10 @@ int ps2_sbv_patch_enable_lmb(void)
 		}
 	}
 
-	if (!match_off)
+	if (!match_off) {
+		printk(KERN_ERR "ps2loadfile: sbv lmb patch: dispatch function not found\n");
 		return -ENOENT;
+	}
 
 	dispatch_ptr = (u32 *)ps2sif_bustovirt(match_off & 0x001FFFFF);
 	hi = dispatch_ptr[7] & 0xffff;
@@ -344,8 +363,10 @@ int ps2_sbv_patch_enable_lmb(void)
 	entry6_addr = jump_table + 0x18;
 
 	patch_addr = ps2sif_allociopheap(128);
-	if (!patch_addr)
+	if (!patch_addr) {
+		printk(KERN_ERR "ps2loadfile: sbv lmb patch: out of IOP heap memory\n");
 		return -ENOMEM;
+	}
 
 	result_addr = (u32)patch_addr + 96;
 
@@ -403,8 +424,12 @@ static int lf_bind_once(void)
 	}
 	lf_bound = 1;
 
-	ps2_sbv_patch_disable_prefix_check();
-	ps2_sbv_patch_enable_lmb();
+	rv = ps2_sbv_patch_disable_prefix_check();
+	if (rv)
+		printk(KERN_WARNING "ps2loadfile: disable_prefix_check returned %d\n", rv);
+	rv = ps2_sbv_patch_enable_lmb();
+	if (rv)
+		printk(KERN_WARNING "ps2loadfile: enable_lmb returned %d\n", rv);
 
 	return 0;
 }
