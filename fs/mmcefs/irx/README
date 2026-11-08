@@ -10,10 +10,10 @@ running.  Install them on the PS2 root filesystem:
 (or point the module parameter irx_dir= at another directory).
 
   file          source                                         sha256
-  iomanX.irx    ps2sdk, ps2dev release v2.0.0 (2026-05-17)     c7efcdaf870d765cb0a6c126f72dc4c57533cbca3a44d208073cf3b30699822d
+  iomanX.irx    ps2sdk v2.0.0 + PSBBN IOPRP 2.4.x compat       a49e6bac68f1e7d9602c99238729e83a07b6a5158841abaeb26af1e8ad125268
   fileXio.irx   ps2sdk, ps2dev release v2.0.0 (2026-05-17)     d158651ca5fcf623e12913a27d0ab1b7f94b03c9e700e7bcc223cf898a7e6711
-  mmceman.irx   github.com/ps2-mmce/mmceman release "latest"   0e96a0dec8e6596220499fc65b76c864208d8f51ec9f8cedbbe78cd10b4ca4a4
-                (2026-08-01)
+  mmceman.irx   ps2-mmce/mmceman + PSBBN/SIO2/VFS fixes        d60b73eb85910869e9b97061ed4c45094f18c9e96574390707f214b6fedbc247
+  poweroff.irx  ps2sdk v2.0.0                                  2de34ce2aa4f2f65d74594c27282ccf036083b49dd8a167849dbba3c7ba1ad5d
 
 iomanX.irx and fileXio.irx are part of ps2sdk (https://github.com/ps2dev/ps2sdk),
 licensed under the Academic Free License 2.0 (LICENSE.ps2sdk).

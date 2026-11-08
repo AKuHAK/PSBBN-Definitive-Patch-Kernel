@@ -7,15 +7,19 @@ Documentation/filesystems/mmcefs.txt
 Status
 ------
 
-  - Builds with the PS2 toolchain (gcc 2.95.2) as a module, without
-    warnings.  Every symbol it imports is exported by the kernel.
-  - DOES NOT WORK ON PSBBN YET (first hardware test, 2026-11-01, SD2PSX
-    in slot 1, PSBBN with this kernel).  The IOP modules cannot be loaded
-    from memory: see "Hardware findings" below.  The fileXio and mmceman
-    parts have therefore not run yet.
-  - Target hardware: SD2PSX in a memory card slot, PSBBN Definitive Patch
-    kernel.  The IOP modules cannot be preloaded in that setup, so mmcefs
-    loads them itself.
+  - Builds with the PS2 toolchain (gcc 2.95.2) as a module or built-in
+    (`CONFIG_MMCEFS=y`), without warnings.
+  - WORKING AND VERIFIED ON PSBBN HARDWARE (2026-11-08, SCPH-70008 with
+    SD2PSX in slot 0, kernel commit 8eeec6e):
+    * Automatic on-mount IRX loading (`iomanX.irx`, `fileXio.irx`,
+      `mmceman.irx`) from `/lib/modules/irx/` via runtime SBV patches in
+      `arch/mips/ps2/loadfile.c`.
+    * Full VFS operations verified on real hardware: directory listing,
+      subdirectory traversal, file reading, file creation/writing, and
+      unlink/deletion.
+    * Full coexistence with DualShock controller (`PADMAN` / `ps2pad`) and
+      Memory Card manager (`MCMAN` / `[ps2mc]` thread in `SW` state, BBN
+      Memory Card utility working normally).
 
 Pieces
 ------
@@ -55,21 +59,66 @@ Then, step by step (stop at the first failure and keep dmesg):
 
 Things to report back if it fails: full dmesg, the step, the exact error.
 
-Hardware findings (2026-11-01)
-------------------------------
+Hardware findings (2026-11-01 .. 2026-11-08)
+--------------------------------------------
 
-  - PSBBN's IOP has a stock LOADFILE server which originally served only
-    function 0 (LF_F_MOD_LOAD) and rejected unsigned mc0: paths (-201).
-  - Runtime SBV patches in arch/mips/ps2/loadfile.c now resolve this:
-    * ps2_sbv_patch_enable_lmb() patches the LOADFILE RPC jump table to
-      support function 6 (LF_F_MOD_BUF_LOAD). ps2_load_module_buffer()
-      can now dynamically load modules (iomanX, fileXio, mmceman) from
-      EE memory buffers directly into IOP memory without modifying BB.ELF.
-    * ps2_sbv_patch_disable_prefix_check() disables the MODLOAD path check,
-      allowing ps2_load_module() to load modules from mc0: if needed.
-  - Do not test LF_F_MOD_LOAD with a ROM module that is already running
-    (e.g. rom0:SIO2MAN): it loads a second copy, and the console later
-    locked up and had to be power-cycled.
+  1. PSBBN LOADFILE & MODLOAD runtime SBV patches (`arch/mips/ps2/loadfile.c`):
+     - PSBBN's IOP has a stock LOADFILE server which originally served only
+       function 0 (`LF_F_MOD_LOAD`) and rejected unsigned `mc0:` paths (-201).
+     - `ps2_sbv_patch_enable_lmb()` patches the LOADFILE RPC jump table to
+       support function 6 (`LF_F_MOD_BUF_LOAD`), enabling `ps2_load_module_buffer()`
+       to dynamically load `iomanX.irx`, `fileXio.irx`, and `mmceman.irx` from
+       EE memory buffers without modifying `BB.ELF`.
+     - `ps2_sbv_patch_disable_prefix_check()` disables the MODLOAD path check.
+     - Fixed an adjacent instruction overwrite in `loadfile.c` (commit `8eeec6e`)
+       that previously triggered an Reserved Instruction Exception (`0x00000028`)
+       in `LOADFILE` on the IOP.
+
+  2. PSBBN IOP runtime (`IOPRP 2.4.x` / `MODLOAD 1.5`) compatibility fixes in
+     `iomanX.irx` and `mmceman.irx`:
+     - Module import table versions: downgraded `intrman` import table version in
+       `iomanX.irx` (`0x0102` -> `0x0101`), and downgraded `loadcore` (`0x0103`
+       -> `0x0101`) and `intrman` (`0x0102` -> `0x0101`) in `mmceman.irx`.
+     - `MODLOAD 1.5` `_start` ABI: `MODLOAD 1.5` passes only `(argc, argv)` to
+       `_start` (not `ModuleInfo *mi` in `$a2`), so `_start` in `iomanX.irx` and
+       `mmceman.irx` was patched to skip `mi` dereference and return `0`
+       (`MODULE_RESIDENT_END`).
+     - Eliminated `intrman` export 15 (`GetIntrmanInternalData`) dependency in
+       `mmceman.irx`: instead of hijacking `IRQ 17` (`INTR_SIO2`) via
+       `GetIntrmanInternalData()`, `mmceman` uses polled SIO2 completion
+       (`my_wait_sio2_complete` at `0x0530`, polling `0xbf80826c` bit 12
+       `TR_IDLE` with `0x0a1` transfer start and `0x0ac` FIFO reset), and
+       restores `0xbf808268 = 0x03bc` (re-enabling `0x300` IRQ bits for
+       `sio2man`) in `mmce_sio2_unlock`.
+
+  3. Upstream bugs discovered and fixed in `mmceman.irx` (applicable to upstream
+     `ps2-mmce/mmceman`):
+     - SIO2 Transfer Queue Contamination (`0xbf808200..0xbf80823c`):
+       `MCMAN` and `PADMAN` populate multiple entries in the 16-register SIO2
+       transfer queue (`SIO2_REG_BASE[0..15]`), whereas `mmceman` only writes
+       `SIO2_REG_BASE[0]`. Without zeroing `SIO2_REG_BASE[1..15]`, the SIO2
+       controller chains into stale `MCMAN`/`PADMAN` descriptors after the first
+       MMCE packet, sending stray clocks and desynchronizing the SD2PSX RP2040
+       PIO state machine on multi-packet commands (`dread`, `open`, `read`,
+       `write`). Added `clear_sio2_queue_and_settle` (`0x0688`) to zero all 16
+       registers and wait ~15us for the RP2040 `/CS` rising-edge PIO reset.
+     - `sio2man` Mutex Hook & `PADMAN` Event Flag Collision (`_sio2man_hook`):
+       Upstream `mmceman` only accepted `sio2man` versions `0x201` and `0x207`
+       (rejecting PSBBN's `sio2man v2.3` = `0x203` with 61 exports) and hooked
+       export 23 (`sio2_pad_transfer_init`), which uses `sio2_ef` event bits
+       `0x001`/`0x002` — colliding directly with `PADMAN`'s 60Hz VBlank thread!
+       Patched `_sio2man_hook` (`0x0304..0x0338`, respecting MIPS I R3000A load
+       delay slots) to accept any `sio2man` with `>= 51` exports and use export
+       50 (`sio2_mc2_transfer_init`, dedicated event bits `0x100`/`0x200`) for
+       locking and export 26 (`sio2_transfer_reset`, bit `0x1000`) for unlocking.
+     - VFS Return Values in `mmce_fs_dread` and `mmce_fs_getstat`:
+       * `mmce_fs_dread`: upstream returned `-1` on end-of-directory (`rdbuf[4]
+         != 0`) instead of `0`, and returned `rdbuf[1]` (`0x00` reserved byte)
+         on entry success instead of `1` (`> 0`). Fixed to return `1` on entry
+         read and `0` on end-of-directory (with proper `mmce_sio2_unlock`).
+       * `mmce_fs_getstat`: upstream returned `-1` (`-EPERM`) when a file did
+         not exist (`rdbuf[0x29] != 0`), breaking VFS negative lookups and file
+         creation (`O_CREAT`). Fixed to return `-2` (`-ENOENT`).
 
 Known risks (check these first)
 -------------------------------
