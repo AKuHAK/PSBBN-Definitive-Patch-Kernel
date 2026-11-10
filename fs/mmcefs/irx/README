@@ -10,7 +10,7 @@ running.  Install them on the PS2 root filesystem:
 (or point the module parameter irx_dir= at another directory).
 
   file          source                                         sha256
-  iomanX.irx    ps2sdk v2.0.0 + PSBBN IOPRP 2.4.x compat       a49e6bac68f1e7d9602c99238729e83a07b6a5158841abaeb26af1e8ad125268
+  iomanX.irx    ps2sdk v2.0.0 + PSBBN compat, no-op shutdown   b38759959baf67f15a2651d80f562c89e14fea688034006ef536b9e3e218009d
   fileXio.irx   ps2sdk, ps2dev release v2.0.0 (2026-05-17)     d158651ca5fcf623e12913a27d0ab1b7f94b03c9e700e7bcc223cf898a7e6711
   mmceman.irx   ps2-mmce/mmceman + PSBBN/SIO2/VFS fixes        d60b73eb85910869e9b97061ed4c45094f18c9e96574390707f214b6fedbc247
   poweroff.irx  ps2sdk v2.0.0                                  2de34ce2aa4f2f65d74594c27282ccf036083b49dd8a167849dbba3c7ba1ad5d
@@ -19,3 +19,9 @@ iomanX.irx and fileXio.irx are part of ps2sdk (https://github.com/ps2dev/ps2sdk)
 licensed under the Academic Free License 2.0 (LICENSE.ps2sdk).
 mmceman.irx is by the MMCE authors (https://github.com/ps2-mmce/mmceman),
 licensed under the MIT license (LICENSE.mmceman).
+
+iomanX.irx: shutdown() (export 2) is patched to return 1 without calling
+unhook_ioman().  loadcore calls it when the IOP reboots, and unhook_ioman()
+calls deinit() on every device, including the ones taken over from the
+original IOMAN.  The IOP then never finished rebooting, so native programs
+started through akmem (BootNative, the __mbr osdboot) hung.
