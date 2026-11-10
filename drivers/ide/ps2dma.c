@@ -39,7 +39,22 @@
 #define XFER_UDMA_6	0x46
 #endif
 
+/*
+ * Default buffer areas per DMA request.  DMARELAY passes the whole list to
+ * sceSifSetDmaIntr() at once and retries until the SIF DMA queue has room,
+ * so a list longer than the queue would hang it.  The limit can be raised
+ * at run time through "dma_max_segments" in /proc/ide/hdX/settings.
+ *
+ * Raising it does not speed up reads: on a SAMSUNG SP0411N in UDMA5, raw
+ * reads of /dev/hda run at about 8 MB/s with both 16 and 32 segments, while
+ * the drive delivers 30-56 MB/s to the IOP.  The limit is the per-request
+ * latency of the relay: EE RPC, DMARELAY reads the whole request into IOP
+ * memory, then SIF DMA to the EE, with no overlap between requests.  Only a
+ * replacement for DMARELAY that reads the next block while sending the
+ * previous one can make Linux disk access faster.
+ */
 #define DMA_MAX_SEGMENTS	16
+#define DMA_MAX_SEGMENTS_LIMIT	32
 
 #define IFC_ATA_RST	0x80
 #define IFC_DMA_EN	0x04
@@ -234,6 +249,60 @@ int report_drive_dmaing (ide_drive_t *drive)
  * the caller should revert to PIO for the current request.
  */
 
+/*
+ * Switch the drive to the fastest UDMA mode it reports, down to UDMA4.
+ * The loader's ATAD already left the drive in a UDMA mode; a mode the
+ * drive rejects leaves that mode in place, so stop at UDMA4 instead of
+ * going below it.
+ */
+static void ps2_ide_set_udma(ide_drive_t *drive)
+{
+	struct hd_driveid *id = drive->id;
+	int mode;
+
+	if (id == NULL || !(id->field_valid & 4))
+		return;
+	for (mode = 6; mode >= 4; mode--) {
+		if (!(id->dma_ultra & (1 << mode)))
+			continue;
+		if (ide_config_drive_speed(drive, XFER_UDMA_0 + mode) == 0) {
+			printk("%s: UDMA%d\n", drive->name, mode);
+			return;
+		}
+	}
+	printk("%s: keeping the loader's transfer mode (UDMA modes: 0x%02x)\n",
+	       drive->name, id->dma_ultra & 0x7f);
+}
+
+static int ps2_ide_dma_max_segments = DMA_MAX_SEGMENTS;
+
+static int ps2_ide_set_max_segments(ide_drive_t *drive, int arg)
+{
+	ide_hwif_t *hwif = HWIF(drive);
+	int *segs = max_segments[hwif->major];
+	int i, minors = MAX_DRIVES * (1 << PARTN_BITS);
+
+	if (arg < 1 || arg > DMA_MAX_SEGMENTS_LIMIT || segs == NULL)
+		return -EINVAL;
+	for (i = 0; i < minors; i++)
+		segs[i] = arg;
+	ps2_ide_dma_max_segments = arg;
+	return 0;
+}
+
+static void ps2_ide_add_settings(ide_drive_t *drive)
+{
+	static int added[MAX_DRIVES];
+	int unit = drive->select.b.unit;
+
+	if (added[unit])
+		return;
+	added[unit] = 1;
+	ide_add_setting(drive, "dma_max_segments", SETTING_RW, -1, -1,
+			TYPE_INT, 1, DMA_MAX_SEGMENTS_LIMIT, 1, 1,
+			&ps2_ide_dma_max_segments, ps2_ide_set_max_segments);
+}
+
 static int ps2_ide_dmaproc (ide_dma_action_t func, ide_drive_t *drive)
 {
 	ide_hwif_t *hwif = HWIF(drive);
@@ -259,10 +328,9 @@ static int ps2_ide_dmaproc (ide_dma_action_t func, ide_drive_t *drive)
 		/* only ide-disk DMA works... */
 		drive->using_dma = hwif->autodma && drive->media == ide_disk;
 
-		if (drive->using_dma) {
-			/* Force UDMA6 for testing. Warning: DEV9 controller may not sync! */
-			ide_config_drive_speed(drive, XFER_UDMA_6);
-		}
+		if (drive->using_dma)
+			ps2_ide_set_udma(drive);
+		ps2_ide_add_settings(drive);
 		return 0;
 
 	case ide_dma_read:
