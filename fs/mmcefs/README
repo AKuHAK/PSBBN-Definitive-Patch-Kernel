@@ -33,6 +33,11 @@ Pieces
   fs/mmcefs/file.c           page cache I/O over one IOP fd per inode.
   fs/mmcefs/irx/             iomanX.irx, fileXio.irx (ps2sdk v2.0.0),
                              mmceman.irx (ps2-mmce release), with licenses.
+  fs/mmcefs/mmcehd.c         a disk image file on the card as /dev/hda
+                             (see "Booting from a disk image" below).
+  fs/mmcefs/irx2c.sh         turns the IRX files into irx_blobs.h for
+                             mmcehd.c at build time (as 2.9-ee has no
+                             .incbin).
 
 Testing on the PS2
 ------------------
@@ -138,6 +143,51 @@ Known risks (check these first)
     addresses (virt_to_phys) and dma_cache_wback_inv/dma_cache_inv around
     each transfer, and the "rests" handling in fx_read().
 
+Booting from a disk image (mmcehd)
+----------------------------------
+
+  mmcehd.c makes a file on the SD card the PS2 hard disk: block major 3,
+  minors 0-63, gendisk name "hd", so the APA parser, ps2fs, ext2/ext3,
+  swap, pfsd and bn see /dev/hda and /dev/hdaN exactly as on the internal
+  HDD.  The file is a byte-for-byte HDD image (APA from sector 0).  It
+  must be one allocated file on an exFAT card (FAT32 stops at 4 GiB);
+  copy it, do not write it over the card.
+
+  - Off unless the command line has "root=/dev/mmce" or "mmce" (default
+    paths mmce0:/PSBBN/psbbn.img, then mmce1:/PSBBN/psbbn.img) or
+    "mmce=<IOP path>".  With root=/dev/mmce the root becomes /dev/hda1:
+    from the image or, if there is none, from the internal HDD.  Sony's
+    loader puts its --root/-rt string after "root=", so use -rt
+    /dev/mmce, or the same string in the 16-byte root field of a copy of
+    p2lboot/BB.ELF (file offset 0x104998).  The loader rejects a root
+    that starts with "/dev/hd" and is longer than 10 characters (BB.ELF
+    0x1000ca8), so "/dev/hda1 mmce" does not work there.
+  - blk_dev_init() calls mmcehd_init() just before ide_init(): the
+    request cache and the max_sectors/ro tables are set up by then.
+    mmcehd loads the built-in iomanX/fileXio/mmceman (irx_blobs.h; the
+    root filesystem is not mounted yet), opens the image, checks the whole
+    APA chain (magic, checksum, bounds; this also proves 64-bit seeks) and
+    takes major 3.  The IDE driver then fails with "UNABLE TO GET MAJOR
+    NUMBER 3" and leaves the internal disk alone.  If anything fails,
+    nothing is registered and the kernel boots from the HDD.
+  - Requests go through the normal elevator (max 64 sectors) to a kernel
+    thread "mmcehd" that does lseek64 + 8 KiB fileXio reads/writes under
+    fx_lock(), so mmcefs on the same card keeps working.  fx_call() waits
+    for the reply without a timeout, so a DMA buffer is never reused while
+    the IOP may still write to it.
+  - BLKRRPART re-reads the APA table like ide_revalidate_disk(): busy
+    partitions are kept (bn/pfsd create __linux.8 and others at run
+    time).  HDIO_DRIVE_CMD is accepted and ignored.  Unknown ioctls are
+    logged (first 16).
+  - mmceman has no sync: on reboot/halt/power-off a reboot notifier syncs
+    and then closes the image, which makes the MMCE firmware write the
+    file back.  /proc/mmcehd shows the path, request counters and time.
+  - Speed is that of the MMCE (about 0.3-0.4 MiB/s measured through
+    mmcefs on an SD2PSX), far below the HDD; accepted, since this is the
+    only way to run PSBBN on a slim without a hard disk.
+  - Native launches (__mbr, HDD games) still use the IOP's own drivers,
+    i.e. the internal HDD; they do not see the image.
+
 Notes for agents
 ----------------
 
@@ -154,7 +204,8 @@ Notes for agents
   - mmceman has no rename, chstat (times/modes) or sync; mmcefs_rename()
     removes an existing target only after the device answered EEXIST, so
     an unsupported rename never deletes data.
-  - Do not reintroduce a block device for the SD card: the MMCE protocol
-    has no raw sector access (only file commands, see docs in
-    github.com/ps2-mmce/mmceman).
+  - Do not reintroduce a block device for the SD card itself: the MMCE
+    protocol has no raw sector access (only file commands, see docs in
+    github.com/ps2-mmce/mmceman).  mmcehd is a block device over one
+    image file, which the protocol does allow.
   - When updating the IRX files, update the sha256 list in irx/README.

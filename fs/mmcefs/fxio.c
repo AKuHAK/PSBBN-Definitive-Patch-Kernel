@@ -130,8 +130,11 @@ static int fx_order;
 #define fx_statbuf	(fx->stat)
 #define fx_direntbuf	(fx->dirent)
 
+/* Safe to call twice: mmcehd needs the buffers before init_mmcefs() */
 int fx_init(void)
 {
+	if (fx)
+		return 0;
 	fx_order = get_order(sizeof(struct fx_bufs));
 	fx = (struct fx_bufs *)__get_free_pages(GFP_KERNEL, fx_order);
 	if (!fx)

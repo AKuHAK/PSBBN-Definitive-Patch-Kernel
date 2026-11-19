@@ -54,3 +54,6 @@ tests/ps2-partitions/work/
 
 # 48-bit LBA QEMU test work directory
 tests/lba48-qemu/work/
+
+# Generated from fs/mmcefs/irx/*.irx
+fs/mmcefs/irx_blobs.h

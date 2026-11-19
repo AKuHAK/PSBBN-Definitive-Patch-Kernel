@@ -1203,6 +1203,10 @@ int __init blk_dev_init(void)
 #ifdef CONFIG_ISP16_CDI
 	isp16_init();
 #endif
+#ifdef CONFIG_PS2_MMCEFS
+	/* a disk image on the MMCE takes major 3 before the IDE driver */
+	{ extern int mmcehd_init(void); mmcehd_init(); }
+#endif
 #if defined(CONFIG_IDE) && defined(CONFIG_BLK_DEV_IDE)
 	ide_init();		/* this MUST precede hd_init */
 #endif
