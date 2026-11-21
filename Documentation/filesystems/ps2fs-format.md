@@ -3,8 +3,7 @@
 The specification `fs/ps2fs` was written against. It is derived from reading the ps2sdk
 reverse-engineered reference (`iop/hdd/libpfs`, `iop/hdd/pfs`, `iop/hdd/fsck`,
 `iop/hdd/fssk`, `iop/hdd/apa`). Everything below restates formats, rules,
-algorithms and orderings in prose, tables and pseudocode. **No reference code is
-reproduced.** ps2sdk is AFL-2.0; do not paste its code into GPL sources.
+algorithms and orderings in prose, tables and pseudocode.
 
 Items marked **UNSURE** say why. Items marked **REF-BUG** are behaviour of the
 reference that looks like a defect. A new implementation should not copy them,
