@@ -397,6 +397,8 @@ int __init ps2sysconf_init(void)
 
 	ps2sysconf_osd_region_init();
 
+	ps2_eegs_tvmode();
+
 	if ((ps2sysconf_lock = ps2sif_getlock(PS2LOCK_SYSCONF)) == NULL) {
 		printk(KERN_ERR "ps2sysconf: Can't get lock\n");
 		return -EINVAL;

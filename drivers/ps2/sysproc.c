@@ -21,6 +21,7 @@ static int init_flags;
 
 /* sysvers */
 #include <asm/ps2/bootinfo.h>
+#include <asm/ps2/romver.h>
 
 /* sysconf */
 #include <asm/ps2/sysconf.h>
@@ -80,6 +81,10 @@ int get_ps2sysconf(char *page, char **start, off_t off,
 				 int count, int *eof, void *data)
 {
         int len;
+        int tvmode = ps2_eegs_tvmode();
+
+        if (tvmode < 0)
+                tvmode = 0;
 
 	sprintf(page,
 		"EXDEVICE=0x%04x\n"
@@ -90,7 +95,8 @@ int get_ps2sysconf(char *page, char **start, off_t off,
 		"TIMEZONE=%d\n"
 		"SUMMERTIME=%d\n"
 		"DATENOTATION=%d\n"
-		"TIMENOTATION=%d\n",
+		"TIMENOTATION=%d\n"
+		"TVMODE=%d\n",
 		ps2_pccard_present,
 		ps2_sysconf->video,
 		ps2_sysconf->spdif,
@@ -99,7 +105,8 @@ int get_ps2sysconf(char *page, char **start, off_t off,
 		ps2_sysconf->timezone,
 		ps2_sysconf->summertime,
 		ps2_sysconf->datenotation,
-		ps2_sysconf->timenotation);
+		ps2_sysconf->timenotation,
+		tvmode);
 
 	len = strlen(page);
 	return proc_calc_metrics(page, start, off, count, eof, len);

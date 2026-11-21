@@ -26,4 +26,10 @@ extern int ps2_rom_read_version(int rom, const char *name, char *buf, int len);
 #define PS2_REGION_DVD		8	/* DVD player region letter */
 extern int ps2_region_params(u8 *params);
 
+/*
+ * TV system from MECHACON Config 0 (EEGS) Block 1.
+ * Returns 1 for PAL, 0 for NTSC, or negative errno on error.
+ */
+extern int ps2_eegs_tvmode(void);
+
 #endif /* __ASM_PS2_ROMVER_H */

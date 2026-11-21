@@ -37,6 +37,9 @@
 #define SCMD_MV		0x03		/* subcommand 0: MECHACON version */
 #define MV_MAJOR	1		/* reply: status, major, minor, ... */
 #define SCMD_REGION	0x36		/* region parameters, MECHACON 6.0+ */
+#define SCMD_OPEN_CFG	0x40		/* MECHACON OpenConfig */
+#define SCMD_READ_CFG	0x41		/* MECHACON ReadConfig */
+#define SCMD_CLOSE_CFG	0x43		/* MECHACON CloseConfig */
 #define SCMD_STAT_ERR	0x80
 #define SCMD_RETRY	5
 
@@ -131,6 +134,9 @@ static int scmd_bind(void)
 {
 	struct completion compl;
 	int i, rv;
+
+	if (scmd_cd.serve != 0)
+		return 0;
 
 	for (i = 0; i < 50; i++) {
 		init_completion(&compl);
@@ -247,3 +253,81 @@ int ps2_region_params(u8 *params)
 }
 
 EXPORT_SYMBOL(ps2_region_params);
+
+static int scmd_close_cfg(struct scmd_arg *arg, u8 *out)
+{
+	int i;
+
+	for (i = 0; i < 20; i++) {
+		if (scmd_apply(arg, out, SCMD_CLOSE_CFG, NULL, 0))
+			return -EIO;
+		if (out[0] == 0)
+			return 0;
+		if (out[0] == 1) {
+			set_current_state(TASK_UNINTERRUPTIBLE);
+			schedule_timeout(1);
+			continue;
+		}
+		return -EIO;
+	}
+	return -EIO;
+}
+
+int ps2_eegs_tvmode(void)
+{
+	static DECLARE_MUTEX(sem);
+	static int status = 1;		/* 1: not read yet */
+	static int tvmode = 0;
+	static const u8 open_in[3] = { 0, 0, 2 }; /* read, config 0, 2 blocks */
+	ps2sif_lock_t *lock;
+	struct scmd_arg *arg;
+	unsigned long page;
+	u8 *out;
+	u8 blk1[16];
+	int rv;
+
+	down(&sem);
+	if (status != 1)
+		goto out;
+	status = -ENODEV;
+	if ((lock = ps2sif_getlock(PS2LOCK_CDVD)) == NULL)
+		goto out;
+	if ((page = __get_free_page(GFP_KERNEL)) == 0) {
+		status = 1;		/* try again later */
+		goto out;
+	}
+	arg = (struct scmd_arg *)page;
+	out = (u8 *)page + 64;
+
+	ps2sif_lock(lock, "eegs");
+	if (scmd_bind() == 0) {
+		if (scmd_apply(arg, out, SCMD_OPEN_CFG, open_in, sizeof(open_in)) == 0) {
+			if (out[0] != 0) {
+				scmd_close_cfg(arg, out);
+				scmd_apply(arg, out, SCMD_OPEN_CFG, open_in, sizeof(open_in));
+			}
+			if (out[0] == 0) {
+				/* Block 0 */
+				scmd_apply(arg, out, SCMD_READ_CFG, NULL, 0);
+				/* Block 1 (TV system in bytes 4-5) */
+				if (scmd_apply(arg, out, SCMD_READ_CFG, NULL, 0) == 0) {
+					memcpy(blk1, out, 16);
+					tvmode = ((blk1[4] & 0xC0) || (blk1[5] & 0x10)) ? 1 : 0;
+					status = 0;
+					printk(KERN_INFO "ps2eegs: TV mode %s (blk1=%02x %02x %02x %02x %02x %02x ... %02x)\n",
+					       tvmode ? "PAL" : "NTSC",
+					       blk1[0], blk1[1], blk1[2], blk1[3], blk1[4], blk1[5], blk1[15]);
+				}
+				scmd_close_cfg(arg, out);
+			}
+		}
+	}
+	ps2sif_unlock(lock);
+	free_page(page);
+ out:
+	rv = (status == 0) ? tvmode : (status == 1 ? -ENOMEM : status);
+	up(&sem);
+	return rv;
+}
+
+EXPORT_SYMBOL(ps2_eegs_tvmode);
