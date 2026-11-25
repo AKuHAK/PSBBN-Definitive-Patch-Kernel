@@ -85,11 +85,15 @@ struct ps2_dmatable {
 
 struct ps2ide_dma_priv {
 	int is_gamestar;
+	int udma_mode;
+	int dma_errors;
 };
 
 #ifdef GATHER_WRITE_DATA
 static unsigned char dma_buffer[ATA_BUFFER_SIZE] __attribute__((aligned(64)));
 #endif
+
+static void ps2_ide_dma_stepdown(ide_drive_t *drive);
 
 /*
  * dma_intr() is the handler for disk read/write DMA interrupts
@@ -114,6 +118,7 @@ ide_startstop_t ide_dma_intr (ide_drive_t *drive)
 			return ide_stopped;
 		}
 		printk("%s: dma_intr: bad DMA status\n", drive->name);
+		ps2_ide_dma_stepdown(drive);
 	}
 	ide__sti();	/* local CPU only */
 	return ide_error(drive, "dma_intr", stat);
@@ -250,28 +255,84 @@ int report_drive_dmaing (ide_drive_t *drive)
  */
 
 /*
- * Switch the drive to the fastest UDMA mode it reports, down to UDMA4.
- * The loader's ATAD already left the drive in a UDMA mode; a mode the
- * drive rejects leaves that mode in place, so stop at UDMA4 instead of
- * going below it.
+ * Switch the drive to the fastest UDMA mode it reports, down to UDMA4
+ * (or UDMA2..0 on GameStar adapters whose SATA bridges often fail at UDMA4+).
  */
 static void ps2_ide_set_udma(ide_drive_t *drive)
 {
 	struct hd_driveid *id = drive->id;
+	struct ps2ide_dma_priv *priv = HWIF(drive)->hwif_data;
 	int mode;
+	int max_mode;
+	int min_mode;
 
 	if (id == NULL || !(id->field_valid & 4))
 		return;
-	for (mode = 6; mode >= 4; mode--) {
+	max_mode = (priv && priv->is_gamestar) ? 2 : 6;
+	min_mode = (priv && priv->is_gamestar) ? 0 : 4;
+	for (mode = max_mode; mode >= min_mode; mode--) {
 		if (!(id->dma_ultra & (1 << mode)))
 			continue;
 		if (ide_config_drive_speed(drive, XFER_UDMA_0 + mode) == 0) {
+			if (priv)
+				priv->udma_mode = XFER_UDMA_0 + mode;
 			printk("%s: UDMA%d\n", drive->name, mode);
 			return;
 		}
 	}
+	if (priv)
+		priv->udma_mode = -1;
 	printk("%s: keeping the loader's transfer mode (UDMA modes: 0x%02x)\n",
 	       drive->name, id->dma_ultra & 0x7f);
+}
+
+static void ps2_ide_dma_stepdown(ide_drive_t *drive)
+{
+	struct ps2ide_dma_priv *priv = HWIF(drive)->hwif_data;
+	int next_mode = -1;
+
+	if (!priv || !drive->using_dma)
+		return;
+	if (++priv->dma_errors < 2)
+		return;
+	priv->dma_errors = 0;
+
+	switch (priv->udma_mode) {
+	case XFER_UDMA_6:
+		next_mode = XFER_UDMA_5;
+		break;
+	case XFER_UDMA_5:
+		next_mode = XFER_UDMA_4;
+		break;
+	case XFER_UDMA_4:
+	case XFER_UDMA_3:
+		next_mode = XFER_UDMA_2;
+		break;
+	case XFER_UDMA_2:
+	case XFER_UDMA_1:
+		next_mode = XFER_UDMA_0;
+		break;
+	case XFER_UDMA_0:
+		next_mode = XFER_MW_DMA_2;
+		break;
+	case -1:
+		next_mode = XFER_UDMA_2;
+		break;
+	default:
+		drive->using_dma = 0;
+		printk(KERN_WARNING "%s: repeated DMA errors, falling back to PIO\n", drive->name);
+		return;
+	}
+
+	priv->udma_mode = next_mode;
+	if (ide_config_drive_speed(drive, next_mode) == 0) {
+		printk(KERN_WARNING "%s: DMA errors, stepping down to mode 0x%02x\n",
+		       drive->name, next_mode);
+	} else {
+		drive->using_dma = 0;
+		printk(KERN_WARNING "%s: DMA stepdown to 0x%02x failed, falling back to PIO\n",
+		       drive->name, next_mode);
+	}
 }
 
 static int ps2_ide_dma_max_segments = DMA_MAX_SEGMENTS;
@@ -484,8 +545,9 @@ static int ps2_ide_dmaproc (ide_dma_action_t func, ide_drive_t *drive)
 	case ide_dma_verbose:
 		return report_drive_dmaing(drive);
 	case ide_dma_timeout:
-	case ide_dma_retune:
 	case ide_dma_lostirq:
+		ps2_ide_dma_stepdown(drive);
+	case ide_dma_retune:
 		return 0;
 
 	default:
@@ -530,6 +592,8 @@ void __init ps2_ide_setup_dma (ide_hwif_t *hwif)
 		goto error;
 	}
 	/* Check for Gamestar adapter */
+	priv->udma_mode = -1;
+	priv->dma_errors = 0;
 	if (*(volatile u16 *)(DEV9M_BASE + 0x20) != 1) {
 		printk(" (gamestar compatible)");
 		priv->is_gamestar = 1;

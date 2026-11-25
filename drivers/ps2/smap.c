@@ -11,6 +11,7 @@
 #if defined(linux)
 
 #include "smap.h"
+#include <asm/ps2/speed.h>
 
 struct smap_chan *smap_chan = NULL;
 
@@ -2862,6 +2863,12 @@ smap_probe(struct net_device *net_dev)
 
 	if (ps2_pccard_present != 0x0100) {
 		printk("PlayStation 2 HDD/Ethernet device NOT present.\n");
+		return(-ENODEV);
+	}
+
+	if (!(*SPD_R_REV_3 & 0x01) || *(volatile u16 *)(DEV9M_BASE + 0x20) != 1) {
+		printk("PlayStation 2 SMAP: not present (HDD-only/GameStar adapter, rev3=0x%02x id=0x%04x)\n",
+		       *SPD_R_REV_3, *(volatile u16 *)(DEV9M_BASE + 0x20));
 		return(-ENODEV);
 	}
 

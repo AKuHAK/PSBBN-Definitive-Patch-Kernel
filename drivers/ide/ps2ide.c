@@ -40,12 +40,20 @@ static void ps2_dev9_reset(void)
 {
 	volatile u8 *if_ctrl_reg = SPD_R_IF_CTRL;
 	u8 if_ctrl;
+	u8 rev1;
+	u8 rev3;
+	u16 rev20;
 
-	printk(KERN_INFO "ps2ide: Resetting DEV9 for GameStar adapter...\n");
+	rev1 = *SPD_R_REV_1;
+	rev3 = *SPD_R_REV_3;
+	rev20 = *(volatile u16 *)(DEV9M_BASE + 0x20);
+	printk(KERN_INFO "ps2ide: DEV9 rev1=0x%02x rev3=0x%02x id=0x%04x, resetting...\n",
+	       rev1, rev3, rev20);
 	if_ctrl = *if_ctrl_reg;
 	*if_ctrl_reg = IFC_ATA_RST;
 	udelay(100);
 	*if_ctrl_reg = if_ctrl;
+	mdelay(20);
 }
 
 static void ps2_ide_select(ide_drive_t *drive)
